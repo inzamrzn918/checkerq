@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme/theme';
 import { ChevronLeft, Save, Plus, Trash2 } from 'lucide-react-native';
@@ -9,6 +9,32 @@ import { StorageService } from '../services/storage';
 export default function ReviewQuestionsScreen({ route, navigation }: any) {
     const { questions: initialQuestions, paperImages, metadata } = route.params;
     const [questions, setQuestions] = useState<Question[]>(initialQuestions);
+    const [isSaved, setIsSaved] = useState(false);
+
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+            if (isSaved) {
+                return;
+            }
+
+            e.preventDefault();
+
+            Alert.alert(
+                'Discard extracted questions?',
+                'Going back will discard the extracted questions and you will need to process the paper again. Are you sure?',
+                [
+                    { text: "Stay here", style: 'cancel', onPress: () => { } },
+                    {
+                        text: 'Discard',
+                        style: 'destructive',
+                        onPress: () => navigation.dispatch(e.data.action),
+                    },
+                ]
+            );
+        });
+
+        return unsubscribe;
+    }, [navigation, isSaved]);
 
     const updateQuestion = (id: string, field: keyof Question, value: any) => {
         setQuestions(prev => prev.map(q => q.id === id ? { ...q, [field]: value } : q));
@@ -41,6 +67,7 @@ export default function ReviewQuestionsScreen({ route, navigation }: any) {
                 createdAt: Date.now(),
             };
             await StorageService.saveAssessment(assessment);
+            setIsSaved(true);
             navigation.navigate('Home', { refresh: true });
         } catch (error) {
             console.error('Error saving assessment:', error);

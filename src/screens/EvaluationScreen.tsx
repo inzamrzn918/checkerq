@@ -1,16 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '../theme/theme';
 import { Camera as CameraIcon, ChevronLeft, Scan, ClipboardCheck } from 'lucide-react-native';
 import { GeminiService } from '../services/gemini';
+import { StorageService, Assessment } from '../services/storage';
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function EvaluationScreen({ route, navigation }: any) {
-    const assessment = route.params?.assessment;
-    const questions = assessment?.questions || [];
+    const [assessments, setAssessments] = useState<Assessment[]>([]);
+    const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(route.params?.assessment || null);
     const [answerSheet, setAnswerSheet] = useState<string | null>(null);
     const [evaluating, setEvaluating] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    useFocusEffect(
+        useCallback(() => {
+            const fetchAssessments = async () => {
+                const data = await StorageService.getAssessments();
+                setAssessments(data);
+                if (route.params?.assessment) {
+                    setSelectedAssessment(route.params.assessment);
+                }
+                setLoading(false);
+            };
+            fetchAssessments();
+        }, [route.params?.assessment])
+    );
 
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -40,17 +57,13 @@ export default function EvaluationScreen({ route, navigation }: any) {
     };
 
     const startEvaluation = async () => {
-        if (!answerSheet) return;
+        if (!answerSheet || !selectedAssessment) return;
 
         setEvaluating(true);
         try {
-            // Dummy questions if none provided for testing
-            const targetQuestions = questions.length > 0 ? questions : [
-                { id: '1', text: 'Sample Question', marks: 5, type: 'Descriptive' }
-            ];
-
-            const evaluation = await GeminiService.evaluatePaper(answerSheet, targetQuestions);
-            navigation.navigate('EvaluationResult', { evaluation, answerSheet });
+            const evaluation = await GeminiService.evaluatePaper(answerSheet, selectedAssessment.questions);
+            // We pass the full assessment object so results screen can show question details
+            navigation.navigate('EvaluationResult', { evaluation, assessment: selectedAssessment, answerSheet });
         } catch (error) {
             Alert.alert('Error', 'Evaluation failed. Please try again.');
             console.error(error);
@@ -72,17 +85,51 @@ export default function EvaluationScreen({ route, navigation }: any) {
             <ScrollView contentContainerStyle={styles.content}>
                 <View style={styles.statusBox}>
                     <ClipboardCheck color={theme.colors.primary} size={24} />
-                    <Text style={styles.statusText}>
-                        Assessment: {assessment?.title || 'Unknown'}
-                    </Text>
+                    <View style={styles.statusInfo}>
+                        <Text style={styles.statusLabel}>Evaluating for:</Text>
+                        <Text style={styles.statusValue}>
+                            {selectedAssessment?.title || 'No Assessment Selected'}
+                        </Text>
+                    </View>
                 </View>
 
-                {!answerSheet ? (
+                {!selectedAssessment ? (
+                    <View style={styles.selectionCard}>
+                        <Text style={styles.selectionTitle}>Select an Assessment</Text>
+                        <Text style={styles.selectionSub}>You must pick a question paper template before scanning answers.</Text>
+
+                        {assessments.length === 0 ? (
+                            <TouchableOpacity
+                                style={styles.createBtn}
+                                onPress={() => navigation.navigate('SetupAssessment')}
+                            >
+                                <Text style={styles.createBtnText}>+ Create New Assessment</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <ScrollView style={styles.pickerList} nestedScrollEnabled>
+                                {assessments.map(a => (
+                                    <TouchableOpacity
+                                        key={a.id}
+                                        style={styles.pickerItem}
+                                        onPress={() => setSelectedAssessment(a)}
+                                    >
+                                        <Text style={styles.pickerItemTitle}>{a.title}</Text>
+                                        <Text style={styles.pickerItemSub}>{a.subject} • {a.questions.length} Qs</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        )}
+                    </View>
+                ) : !answerSheet ? (
                     <View style={styles.scannerInterface}>
                         <View style={styles.scanTarget}>
                             <Scan color={theme.colors.border} size={100} strokeWidth={1} />
                             <Text style={styles.scanHint}>Align answer sheet within the frame</Text>
                         </View>
+
+                        <TouchableOpacity style={styles.changeAssessmentBtn} onPress={() => setSelectedAssessment(null)}>
+                            <Text style={styles.changeAssessmentText}>Change Assessment</Text>
+                        </TouchableOpacity>
 
                         <View style={styles.controls}>
                             <TouchableOpacity style={styles.circleBtn} onPress={uploadFromGallery}>
@@ -149,16 +196,23 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: theme.colors.surface,
-        padding: 12,
-        borderRadius: 12,
+        padding: 16,
+        borderRadius: 16,
         marginBottom: 24,
         borderWidth: 1,
         borderColor: theme.colors.border,
     },
-    statusText: {
-        color: theme.colors.text,
+    statusInfo: {
         marginLeft: 12,
-        fontWeight: '500',
+    },
+    statusLabel: {
+        color: theme.colors.textSecondary,
+        fontSize: 12,
+    },
+    statusValue: {
+        color: theme.colors.text,
+        fontWeight: '700',
+        fontSize: 16,
     },
     scannerInterface: {
         alignItems: 'center',
@@ -178,6 +232,65 @@ const styles = StyleSheet.create({
     scanHint: {
         color: theme.colors.textSecondary,
         marginTop: 20,
+    },
+    selectionCard: {
+        backgroundColor: theme.colors.surface,
+        padding: 24,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    selectionTitle: {
+        color: theme.colors.text,
+        fontSize: 20,
+        fontWeight: '700',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    selectionSub: {
+        color: theme.colors.textSecondary,
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
+        marginBottom: 24,
+    },
+    pickerList: {
+        maxHeight: 300,
+    },
+    pickerItem: {
+        padding: 16,
+        backgroundColor: theme.colors.background,
+        borderRadius: 12,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    pickerItemTitle: {
+        color: theme.colors.text,
+        fontWeight: '600',
+        fontSize: 16,
+    },
+    pickerItemSub: {
+        color: theme.colors.textSecondary,
+        fontSize: 12,
+        marginTop: 2,
+    },
+    createBtn: {
+        backgroundColor: theme.colors.primary,
+        padding: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    createBtnText: {
+        color: '#fff',
+        fontWeight: '700',
+    },
+    changeAssessmentBtn: {
+        padding: 16,
+    },
+    changeAssessmentText: {
+        color: theme.colors.primary,
+        fontWeight: '600',
     },
     controls: {
         flexDirection: 'row',

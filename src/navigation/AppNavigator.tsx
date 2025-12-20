@@ -7,6 +7,7 @@ import ReviewQuestionsScreen from '../screens/ReviewQuestionsScreen';
 import EvaluationScreen from '../screens/EvaluationScreen';
 import EvaluationResultScreen from '../screens/EvaluationResultScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import HistoryScreen from '../screens/HistoryScreen';
 
 const Stack = createStackNavigator();
 
@@ -26,6 +27,7 @@ export default function AppStack() {
                 <Stack.Screen name="Evaluation" component={EvaluationScreen} />
                 <Stack.Screen name="EvaluationResult" component={EvaluationResultScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="History" component={HistoryScreen} />
             </Stack.Navigator>
         </NavigationContainer>
     );

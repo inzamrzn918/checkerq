@@ -3,29 +3,56 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { Plus, FileText, Settings as SettingsIcon, History, ClipboardCheck, ChevronRight } from 'lucide-react-native';
-import { StorageService, Assessment } from '../services/storage';
+import { Plus, FileText, Settings as SettingsIcon, History, ClipboardCheck, ChevronRight, Filter, Download } from 'lucide-react-native';
+import { StorageService, Assessment, Evaluation } from '../services/storage';
+import { exportAllAssessmentsToExcel } from '../utils/export';
 
 export default function HomeScreen({ navigation }: any) {
     const [assessments, setAssessments] = useState<Assessment[]>([]);
+    const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
     const [refreshing, setRefreshing] = useState(false);
+    const [filterSubject, setFilterSubject] = useState<string>('');
+    const [filterClass, setFilterClass] = useState<string>('');
 
-    const loadAssessments = useCallback(async () => {
-        const data = await StorageService.getAssessments();
-        setAssessments(data);
+    const loadData = useCallback(async () => {
+        const [aData, eData] = await Promise.all([
+            StorageService.getAssessments(),
+            StorageService.getEvaluations()
+        ]);
+        setAssessments(aData);
+        setEvaluations(eData);
     }, []);
 
     useFocusEffect(
         useCallback(() => {
-            loadAssessments();
-        }, [loadAssessments])
+            loadData();
+        }, [loadData])
     );
 
     const onRefresh = async () => {
         setRefreshing(true);
-        await loadAssessments();
+        await loadData();
         setRefreshing(false);
     };
+
+    const handleExportExcel = async () => {
+        try {
+            await exportAllAssessmentsToExcel(assessments, evaluations);
+        } catch (error) {
+            console.error('Export failed:', error);
+        }
+    };
+
+    const subjects = Array.from(new Set(assessments.map(a => a.subject).filter(Boolean)));
+    const classes = Array.from(new Set(assessments.map(a => a.classRoom).filter(Boolean)));
+
+    const filteredAssessments = assessments.filter(a => {
+        const matchSubject = !filterSubject || a.subject === filterSubject;
+        const matchClass = !filterClass || a.classRoom === filterClass;
+        return matchSubject && matchClass;
+    });
+
+    const totalQuestions = assessments.reduce((acc, curr) => acc + curr.questions.length, 0);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -45,14 +72,72 @@ export default function HomeScreen({ navigation }: any) {
             >
                 <View style={styles.statsContainer}>
                     <View style={styles.statCard}>
-                        <Text style={styles.statValue}>{assessments.length}</Text>
-                        <Text style={styles.statLabel}>Assessments</Text>
+                        <View style={[styles.statIcon, { backgroundColor: theme.colors.primary + '15' }]}>
+                            <FileText color={theme.colors.primary} size={20} />
+                        </View>
+                        <View>
+                            <Text style={styles.statValue}>{assessments.length}</Text>
+                            <Text style={styles.statLabel}>Assessments</Text>
+                        </View>
                     </View>
                     <View style={styles.statCard}>
-                        <Text style={styles.statValue}>150</Text>
-                        <Text style={styles.statLabel}>Evaluated</Text>
+                        <View style={[styles.statIcon, { backgroundColor: theme.colors.secondary + '15' }]}>
+                            <ClipboardCheck color={theme.colors.secondary} size={20} />
+                        </View>
+                        <View>
+                            <Text style={styles.statValue}>{evaluations.length}</Text>
+                            <Text style={styles.statLabel}>Evaluated</Text>
+                        </View>
                     </View>
                 </View>
+
+                {assessments.length > 0 && (
+                    <>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Filters</Text>
+                            <TouchableOpacity onPress={handleExportExcel} style={styles.exportLink}>
+                                <Download size={16} color={theme.colors.primary} />
+                                <Text style={styles.exportText}>Export All</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterContainer}>
+                            <TouchableOpacity
+                                style={[styles.filterChip, !filterSubject && styles.filterChipActive]}
+                                onPress={() => setFilterSubject('')}
+                            >
+                                <Text style={[styles.filterChipText, !filterSubject && styles.filterChipTextActive]}>All Subjects</Text>
+                            </TouchableOpacity>
+                            {subjects.map(sub => (
+                                <TouchableOpacity
+                                    key={sub}
+                                    style={[styles.filterChip, filterSubject === sub && styles.filterChipActive]}
+                                    onPress={() => setFilterSubject(sub)}
+                                >
+                                    <Text style={[styles.filterChipText, filterSubject === sub && styles.filterChipTextActive]}>{sub}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.filterContainer, { marginTop: 8, marginBottom: 24 }]}>
+                            <TouchableOpacity
+                                style={[styles.filterChip, !filterClass && styles.filterChipActive]}
+                                onPress={() => setFilterClass('')}
+                            >
+                                <Text style={[styles.filterChipText, !filterClass && styles.filterChipTextActive]}>All Classes</Text>
+                            </TouchableOpacity>
+                            {classes.map(cls => (
+                                <TouchableOpacity
+                                    key={cls}
+                                    style={[styles.filterChip, filterClass === cls && styles.filterChipActive]}
+                                    onPress={() => setFilterClass(cls)}
+                                >
+                                    <Text style={[styles.filterChipText, filterClass === cls && styles.filterChipTextActive]}>{cls}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </>
+                )}
 
                 <Text style={styles.sectionTitle}>Quick Actions</Text>
 
@@ -84,15 +169,54 @@ export default function HomeScreen({ navigation }: any) {
                     <Plus color={theme.colors.textSecondary} size={20} />
                 </TouchableOpacity>
 
+                {evaluations.length > 0 && (
+                    <View style={styles.recentSection}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Recent Evaluations</Text>
+                            <TouchableOpacity onPress={() => navigation.navigate('History')}>
+                                <Text style={styles.viewAll}>View All</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.evalScroll}>
+                            {evaluations.slice(0, 5).map(evalItem => {
+                                const assessment = assessments.find(a => a.id === evalItem.assessmentId);
+                                return (
+                                    <TouchableOpacity
+                                        key={evalItem.id}
+                                        style={styles.evalCard}
+                                        onPress={() => navigation.navigate('EvaluationResult', {
+                                            evaluation: evalItem,
+                                            assessment,
+                                            answerSheet: evalItem.studentImage
+                                        })}
+                                    >
+                                        <View style={styles.evalScoreCircle}>
+                                            <Text style={styles.evalScoreText}>
+                                                {Math.round((evalItem.obtainedMarks / evalItem.totalMarks) * 100)}%
+                                            </Text>
+                                        </View>
+                                        <Text style={styles.evalTitle} numberOfLines={1}>
+                                            {assessment?.subject || 'Unknown'}
+                                        </Text>
+                                        <Text style={styles.evalSub}>
+                                            {new Date(evalItem.createdAt).toLocaleDateString()}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                    </View>
+                )}
+
                 <View style={styles.recentSection}>
-                    <Text style={styles.sectionTitle}>Recent Assessments</Text>
-                    {assessments.length === 0 ? (
+                    <Text style={styles.sectionTitle}>Assessments ({filteredAssessments.length})</Text>
+                    {filteredAssessments.length === 0 ? (
                         <View style={styles.emptyRecent}>
                             <History color={theme.colors.border} size={48} />
-                            <Text style={styles.emptyText}>No assessments yet. Create one to get started!</Text>
+                            <Text style={styles.emptyText}>No matching assessments found.</Text>
                         </View>
                     ) : (
-                        assessments.map(item => (
+                        filteredAssessments.map(item => (
                             <TouchableOpacity
                                 key={item.id}
                                 style={styles.assessmentItem}
@@ -103,9 +227,14 @@ export default function HomeScreen({ navigation }: any) {
                                 </View>
                                 <View style={styles.assessmentInfo}>
                                     <Text style={styles.assessmentTitle}>{item.title}</Text>
-                                    <Text style={styles.assessmentSub}>
-                                        {item.subject} • {item.classRoom}
-                                    </Text>
+                                    <View style={styles.metaRow}>
+                                        <Text style={styles.assessmentSub}>
+                                            {item.subject} • {item.classRoom}
+                                        </Text>
+                                        <View style={styles.badge}>
+                                            <Text style={styles.badgeText}>{item.questions.length} Qs</Text>
+                                        </View>
+                                    </View>
                                 </View>
                                 <ChevronRight color={theme.colors.textSecondary} size={20} />
                             </TouchableOpacity>
@@ -156,21 +285,30 @@ const styles = StyleSheet.create({
     statCard: {
         flex: 1,
         backgroundColor: theme.colors.surface,
-        padding: theme.spacing.lg,
+        padding: theme.spacing.md,
         borderRadius: theme.borderRadius.lg,
+        flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
         borderColor: theme.colors.border,
+        gap: 12,
+    },
+    statIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     statValue: {
-        color: theme.colors.primary,
-        fontSize: 24,
+        color: theme.colors.text,
+        fontSize: 20,
         fontWeight: 'bold',
     },
     statLabel: {
         color: theme.colors.textSecondary,
-        fontSize: 14,
-        marginTop: 4,
+        fontSize: 12,
+        marginTop: 2,
     },
     sectionTitle: {
         color: theme.colors.text,
@@ -253,7 +391,63 @@ const styles = StyleSheet.create({
     assessmentSub: {
         color: theme.colors.textSecondary,
         fontSize: 12,
-        marginTop: 2,
+    },
+    metaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+        gap: 8,
+    },
+    badge: {
+        backgroundColor: theme.colors.primary + '15',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    badgeText: {
+        color: theme.colors.primary,
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: theme.spacing.sm,
+    },
+    exportLink: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    exportText: {
+        color: theme.colors.primary,
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    filterContainer: {
+        marginBottom: theme.spacing.md,
+    },
+    filterChip: {
+        backgroundColor: theme.colors.surface,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        marginRight: 8,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    filterChipActive: {
+        backgroundColor: theme.colors.primary,
+        borderColor: theme.colors.primary,
+    },
+    filterChipText: {
+        color: theme.colors.textSecondary,
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    filterChipTextActive: {
+        color: '#fff',
     },
     fab: {
         position: 'absolute',
@@ -266,5 +460,47 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         ...theme.shadows.md,
+    },
+    evalScroll: {
+        marginBottom: theme.spacing.lg,
+    },
+    evalCard: {
+        width: 140,
+        backgroundColor: theme.colors.surface,
+        padding: 16,
+        borderRadius: 16,
+        marginRight: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    evalScoreCircle: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        backgroundColor: theme.colors.primary + '15',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    evalScoreText: {
+        color: theme.colors.primary,
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    evalTitle: {
+        color: theme.colors.text,
+        fontSize: 14,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    evalSub: {
+        color: theme.colors.textSecondary,
+        fontSize: 11,
+    },
+    viewAll: {
+        color: theme.colors.primary,
+        fontSize: 14,
+        fontWeight: '600',
     },
 });

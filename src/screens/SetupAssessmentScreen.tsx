@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -13,6 +13,37 @@ export default function SetupAssessmentScreen({ navigation }: any) {
     const [subject, setSubject] = useState('');
     const [classRoom, setClassRoom] = useState('');
     const [loading, setLoading] = useState(false);
+
+    const isFormFilled = teacherName.trim() !== '' || subject.trim() !== '' || classRoom.trim() !== '' || images.length > 0;
+
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+            if (!isFormFilled || loading) {
+                // If the form is empty, or we're currently processing, don't show the alert
+                return;
+            }
+
+            // Prevent default behavior of leaving the screen
+            e.preventDefault();
+
+            // Prompt the user before leaving the screen
+            Alert.alert(
+                'Discard changes?',
+                'You have unsaved changes. Are you sure you want to discard them and leave the screen?',
+                [
+                    { text: "Don't leave", style: 'cancel', onPress: () => { } },
+                    {
+                        text: 'Discard',
+                        style: 'destructive',
+                        // If the user confirms, then we can continue the action
+                        onPress: () => navigation.dispatch(e.data.action),
+                    },
+                ]
+            );
+        });
+
+        return unsubscribe;
+    }, [navigation, isFormFilled, loading]);
 
     const pickImage = async () => {
         const result = await ImagePicker.launchImageLibraryAsync({

@@ -1,12 +1,18 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme/theme';
-import { ChevronLeft, CheckCircle, XCircle, Award, Share2 } from 'lucide-react-native';
-import { PaperEvaluation } from '../services/gemini';
+import { ChevronLeft, CheckCircle, Award, Share2, Plus, Minus, Download, Save } from 'lucide-react-native';
+import { PaperEvaluation, Question as GeminiQuestion } from '../services/gemini';
+import { StorageService, Assessment, Evaluation } from '../services/storage';
+import { exportGradeCardToPDF } from '../utils/export';
 
 export default function EvaluationResultScreen({ route, navigation }: any) {
-    const { evaluation }: { evaluation: PaperEvaluation } = route.params;
+    const { evaluation: initialEval, assessment, answerSheet, isResuming }: { evaluation: any, assessment: Assessment, answerSheet: string, isResuming?: boolean } = route.params;
+    const [evaluation, setEvaluation] = React.useState(initialEval);
+    const [isSaving, setIsSaving] = React.useState(false);
+
+    const isExisting = !!initialEval.id && initialEval.id !== 'temp';
 
     const scorePercentage = (evaluation.obtainedMarks / evaluation.totalMarks) * 100;
 
@@ -16,6 +22,76 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
         return theme.colors.error;
     };
 
+    const adjustMark = (resIdx: number, delta: number) => {
+        const newResults = [...evaluation.results];
+        const res = { ...newResults[resIdx] };
+
+        // Find max marks for this question
+        const q = assessment.questions.find(q => q.id === res.questionId);
+        const maxMarks = q?.marks || 10;
+
+        const newMark = Math.max(0, Math.min(maxMarks, res.obtainedMarks + delta));
+        if (newMark === res.obtainedMarks) return;
+
+        res.obtainedMarks = newMark;
+        newResults[resIdx] = res;
+
+        const newTotalObtained = newResults.reduce((acc, curr) => acc + curr.obtainedMarks, 0);
+
+        setEvaluation({
+            ...evaluation,
+            results: newResults,
+            obtainedMarks: newTotalObtained
+        });
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            const evalData: Evaluation = {
+                id: isExisting ? initialEval.id : Math.random().toString(36).substr(2, 9),
+                assessmentId: assessment.id,
+                studentImage: answerSheet,
+                totalMarks: evaluation.totalMarks,
+                obtainedMarks: evaluation.obtainedMarks,
+                overallFeedback: evaluation.overallFeedback,
+                results: evaluation.results,
+                createdAt: evaluation.createdAt || Date.now()
+            };
+
+            if (isExisting) {
+                // In a real app we might need an updateEvaluation method, 
+                // but saveEvaluation uses INSERT OR REPLACE if we set it up correctly in storage.ts
+                await StorageService.saveEvaluation(evalData);
+            } else {
+                await StorageService.saveEvaluation(evalData);
+            }
+            navigation.navigate('Home');
+        } catch (error) {
+            console.error('Save failed:', error);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleExport = async () => {
+        try {
+            const evForStorage = {
+                id: 'temp',
+                assessmentId: assessment.id,
+                studentImage: answerSheet,
+                totalMarks: evaluation.totalMarks,
+                obtainedMarks: evaluation.obtainedMarks,
+                overallFeedback: evaluation.overallFeedback,
+                results: evaluation.results,
+                createdAt: Date.now()
+            };
+            await exportGradeCardToPDF(evForStorage, assessment);
+        } catch (error) {
+            console.error('Export failed:', error);
+        }
+    };
+
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
@@ -23,8 +99,8 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
                     <ChevronLeft color={theme.colors.text} size={28} />
                 </TouchableOpacity>
                 <Text style={styles.title}>Evaluation Result</Text>
-                <TouchableOpacity>
-                    <Share2 color={theme.colors.text} size={24} />
+                <TouchableOpacity onPress={handleExport}>
+                    <Download color={theme.colors.text} size={24} />
                 </TouchableOpacity>
             </View>
 
@@ -45,32 +121,53 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
                     <Text style={styles.feedbackText}>{evaluation.overallFeedback}</Text>
                 </View>
 
-                <Text style={styles.sectionTitle}>Question Breakdown</Text>
-                {evaluation.results.map((res, idx) => (
-                    <View key={idx} style={styles.breakdownCard}>
-                        <View style={styles.resHeader}>
-                            <Text style={styles.resQNum}>Question {idx + 1}</Text>
-                            <View style={styles.resMarkBadge}>
-                                <Text style={styles.resMarkText}>{res.obtainedMarks} pts</Text>
+                <Text style={styles.sectionTitle}>Review & Adjust Marks</Text>
+                {evaluation.results.map((res: any, idx: number) => {
+                    const q = assessment.questions.find(foundQ => foundQ.id === res.questionId);
+                    return (
+                        <View key={idx} style={styles.breakdownCard}>
+                            <View style={styles.resHeader}>
+                                <View style={styles.qInfo}>
+                                    <Text style={styles.resQNum}>Question {idx + 1}</Text>
+                                    <Text style={styles.qText} numberOfLines={2}>{q?.text}</Text>
+                                </View>
+                                <View style={styles.markAdjustment}>
+                                    <TouchableOpacity style={styles.adjBtn} onPress={() => adjustMark(idx, -1)}>
+                                        <Minus size={16} color={theme.colors.text} />
+                                    </TouchableOpacity>
+                                    <View style={styles.resMarkBadge}>
+                                        <Text style={styles.resMarkText}>{res.obtainedMarks}/{q?.marks || '?'}</Text>
+                                    </View>
+                                    <TouchableOpacity style={styles.adjBtn} onPress={() => adjustMark(idx, 1)}>
+                                        <Plus size={16} color={theme.colors.text} />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            <Text style={styles.ansLabel}>Student Answer:</Text>
+                            <Text style={styles.ansText}>"{res.studentAnswer}"</Text>
+
+                            <View style={styles.aiFeedback}>
+                                <Text style={styles.aiLabel}>AI Feedback:</Text>
+                                <Text style={styles.aiText}>{res.feedback}</Text>
                             </View>
                         </View>
-
-                        <Text style={styles.ansLabel}>Student Answer:</Text>
-                        <Text style={styles.ansText}>"{res.studentAnswer}"</Text>
-
-                        <View style={styles.aiFeedback}>
-                            <Text style={styles.aiLabel}>AI Feedback:</Text>
-                            <Text style={styles.aiText}>{res.feedback}</Text>
-                        </View>
-                    </View>
-                ))}
+                    );
+                })}
 
                 <TouchableOpacity
-                    style={styles.doneBtn}
-                    onPress={() => navigation.navigate('Home')}
+                    style={[styles.doneBtn, isSaving && styles.disabledBtn]}
+                    onPress={handleSave}
+                    disabled={isSaving}
                 >
-                    <CheckCircle color="#fff" size={20} />
-                    <Text style={styles.doneBtnText}>Back to Dashboard</Text>
+                    {isSaving ? <ActivityIndicator color="#fff" /> : (
+                        <>
+                            {isExisting ? <Save color="#fff" size={20} /> : <CheckCircle color="#fff" size={20} />}
+                            <Text style={styles.doneBtnText}>
+                                {isExisting ? 'Update & Close' : 'Save Results & Close'}
+                            </Text>
+                        </>
+                    )}
                 </TouchableOpacity>
 
                 <View style={{ height: 40 }} />
@@ -209,6 +306,33 @@ const styles = StyleSheet.create({
     aiText: {
         color: theme.colors.text,
         fontSize: 14,
+    },
+    qInfo: {
+        flex: 1,
+        marginRight: 8,
+    },
+    qText: {
+        color: theme.colors.textSecondary,
+        fontSize: 12,
+        marginTop: 2,
+    },
+    markAdjustment: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    adjBtn: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: theme.colors.background,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    disabledBtn: {
+        backgroundColor: theme.colors.border,
     },
     doneBtn: {
         flexDirection: 'row',
