@@ -14,13 +14,9 @@ export const initDB = async () => {
 
             await database.execAsync('PRAGMA foreign_keys = ON;');
 
-            // RESET SCHEMA FOR DEBUGGING
-            await database.execAsync('DROP TABLE IF EXISTS evaluations;');
-            await database.execAsync('DROP TABLE IF EXISTS questions;');
-            await database.execAsync('DROP TABLE IF EXISTS assessments;');
-
+            // Ensure tables exist
             await database.execAsync(`
-                CREATE TABLE assessments (
+                CREATE TABLE IF NOT EXISTS assessments (
                     id TEXT PRIMARY KEY NOT NULL,
                     title TEXT NOT NULL,
                     teacherName TEXT,
@@ -32,7 +28,7 @@ export const initDB = async () => {
             `);
 
             await database.execAsync(`
-                CREATE TABLE questions (
+                CREATE TABLE IF NOT EXISTS questions (
                     id TEXT PRIMARY KEY NOT NULL,
                     assessmentId TEXT NOT NULL,
                     text TEXT NOT NULL,
@@ -45,7 +41,7 @@ export const initDB = async () => {
             `);
 
             await database.execAsync(`
-                CREATE TABLE evaluations (
+                CREATE TABLE IF NOT EXISTS evaluations (
                     id TEXT PRIMARY KEY NOT NULL,
                     assessmentId TEXT NOT NULL,
                     studentImage TEXT NOT NULL,

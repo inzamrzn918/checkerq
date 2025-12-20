@@ -5,6 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { theme } from '../theme/theme';
 import { Camera as CameraIcon, ChevronLeft, Scan, ClipboardCheck } from 'lucide-react-native';
 import { GeminiService } from '../services/gemini';
+import { MistralService } from '../services/mistral';
 import { StorageService, Assessment } from '../services/storage';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -13,6 +14,7 @@ export default function EvaluationScreen({ route, navigation }: any) {
     const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(route.params?.assessment || null);
     const [answerSheet, setAnswerSheet] = useState<string | null>(null);
     const [evaluating, setEvaluating] = useState(false);
+    const [evaluationStatus, setEvaluationStatus] = useState('');
     const [loading, setLoading] = useState(true);
 
     useFocusEffect(
@@ -60,8 +62,18 @@ export default function EvaluationScreen({ route, navigation }: any) {
         if (!answerSheet || !selectedAssessment) return;
 
         setEvaluating(true);
+        setEvaluationStatus('Extracting text (Mistral OCR)...');
+
         try {
-            const evaluation = await GeminiService.evaluatePaper(answerSheet, selectedAssessment.questions);
+            // Step 1: Extract Text via Mistral
+            const extractedText = await MistralService.extractText(answerSheet);
+            console.log("Mistral Extracted Text:", extractedText.substring(0, 100) + "...");
+
+            setEvaluationStatus('Grading answers (Gemini)...');
+
+            // Step 2: Evaluate Text via Gemini
+            const evaluation = await GeminiService.evaluatePaperText(extractedText, selectedAssessment.questions);
+
             // We pass the full assessment object so results screen can show question details
             navigation.navigate('EvaluationResult', { evaluation, assessment: selectedAssessment, answerSheet });
         } catch (error) {
@@ -69,6 +81,7 @@ export default function EvaluationScreen({ route, navigation }: any) {
             console.error(error);
         } finally {
             setEvaluating(false);
+            setEvaluationStatus('');
         }
     };
 
@@ -158,7 +171,10 @@ export default function EvaluationScreen({ route, navigation }: any) {
                             disabled={evaluating}
                         >
                             {evaluating ? (
-                                <ActivityIndicator color="#fff" />
+                                <View style={{ alignItems: 'center' }}>
+                                    <ActivityIndicator color="#fff" />
+                                    <Text style={{ color: '#ffffffcc', marginTop: 8, fontSize: 12 }}>{evaluationStatus}</Text>
+                                </View>
                             ) : (
                                 <>
                                     <Text style={styles.evaluateBtnText}>Evaluate Now</Text>

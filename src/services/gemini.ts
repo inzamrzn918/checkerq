@@ -148,5 +148,56 @@ export const GeminiService = {
             console.error("Evaluation error:", error);
             throw error;
         }
+    },
+
+    async evaluatePaperText(studentText: string, questions: Question[]): Promise<PaperEvaluation> {
+        if (!userApiKey) throw new Error("API Key not found. Please set it in Settings.");
+
+        try {
+            const model = genAI(userApiKey).getGenerativeModel({ model: "gemini-flash-latest" });
+
+            const prompt = `
+        You are an expert teacher. Evaluate the following student answers (extracted via OCR) based on the provided questions.
+
+        QUESTIONS:
+        ${JSON.stringify(questions, null, 2)}
+
+        STUDENT ANSWERS (OCR TEXT):
+        ${studentText}
+
+        For each question:
+        1. Match the student's answer to the question.
+        2. Grade it fairly based on marks.
+        3. Provide helpful feedback.
+
+        Return ONLY a JSON object with this structure:
+        {
+          "totalMarks": ${questions.reduce((sum, q) => sum + q.marks, 0)},
+          "obtainedMarks": 0,
+          "overallFeedback": "Overall performance comment",
+          "results": [
+            {
+              "questionId": "q1",
+              "obtainedMarks": 5,
+              "studentAnswer": "The matched answer text...",
+              "feedback": "Correct"
+            }
+          ]
+        }
+      `;
+
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            const text = response.text();
+
+            const jsonMatch = text.match(/\{.*\}/s);
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[0]);
+            }
+            throw new Error("Failed to parse evaluation JSON from text");
+        } catch (error) {
+            console.error("Text Evaluation error:", error);
+            throw error;
+        }
     }
 };
