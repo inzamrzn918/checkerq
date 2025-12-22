@@ -65,6 +65,17 @@ export const initDB = async () => {
         }
     })();
 
+    // Attempt to add studentName column if it's missing (simple migration)
+    initPromise.then(async (database) => {
+        try {
+            await database.execAsync('ALTER TABLE evaluations ADD COLUMN studentName TEXT;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE evaluations ADD COLUMN pages TEXT;');
+        } catch (e) { /* ignore */ }
+    });
+
     return initPromise;
 };
 

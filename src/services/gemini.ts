@@ -25,6 +25,7 @@ export interface EvaluationResult {
 export interface PaperEvaluation {
     totalMarks: number;
     obtainedMarks: number;
+    studentName?: string;
     results: EvaluationResult[];
     overallFeedback: string;
 }
@@ -113,6 +114,7 @@ export const GeminiService = {
 
         Return ONLY a JSON object with this structure:
         {
+          "studentName": "John Doe", 
           "totalMarks": 50,
           "obtainedMarks": 45,
           "overallFeedback": "Overall performance comment",
@@ -172,6 +174,7 @@ export const GeminiService = {
 
         Return ONLY a JSON object with this structure:
         {
+          "studentName": "Student Name (if found in text, else 'Unknown')",
           "totalMarks": ${questions.reduce((sum, q) => sum + q.marks, 0)},
           "obtainedMarks": 0,
           "overallFeedback": "Overall performance comment",
@@ -198,6 +201,44 @@ export const GeminiService = {
         } catch (error) {
             console.error("Text Evaluation error:", error);
             throw error;
+        }
+    },
+
+    async extractStudentInfo(uri: string): Promise<{ name?: string; rollNo?: string; class?: string }> {
+        if (!userApiKey) throw new Error("API Key not found.");
+
+        try {
+            const model = genAI(userApiKey).getGenerativeModel({ model: "gemini-flash-latest" });
+            const base64Data = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+
+            const prompt = `
+                Analyze this exam paper cover page. Extract the following student details:
+                1. Student Name
+                2. Roll Number / Student ID
+                3. Class / Grade
+
+                Return ONLY a JSON object:
+                {
+                    "name": "Returned Name",
+                    "rollNo": "123",
+                    "class": "10"
+                }
+                If a field is not found, return null.
+            `;
+
+            const result = await model.generateContent([
+                prompt,
+                { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+            ]);
+            const response = await result.response;
+            const text = response.text();
+
+            const jsonMatch = text.match(/\{.*\}/s);
+            if (jsonMatch) return JSON.parse(jsonMatch[0]);
+            return {};
+        } catch (error) {
+            console.error("Student Info Extraction Error:", error);
+            return {};
         }
     }
 };

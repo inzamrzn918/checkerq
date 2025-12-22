@@ -90,27 +90,43 @@ export const exportGradeCardToPDF = async (evaluation: Evaluation, assessment: A
 };
 
 export const exportAllAssessmentsToExcel = async (assessments: Assessment[], evaluations: Evaluation[]) => {
-    const data = evaluations.map(ev => {
+    // 1. Group evaluations by Class
+    const evaluationsByClass: Record<string, any[]> = {};
+
+    evaluations.forEach(ev => {
         const assessment = assessments.find(a => a.id === ev.assessmentId);
-        return {
+        const className = assessment?.classRoom || 'Unassigned';
+
+        if (!evaluationsByClass[className]) {
+            evaluationsByClass[className] = [];
+        }
+
+        evaluationsByClass[className].push({
+            'Student Name': ev.studentName || 'Unknown',
             'Assessment Title': assessment?.title || 'N/A',
             'Subject': assessment?.subject || 'N/A',
-            'Class': assessment?.classRoom || 'N/A',
-            'Teacher': assessment?.teacherName || 'N/A',
             'Obtained Marks': ev.obtainedMarks,
             'Total Marks': ev.totalMarks,
             'Percentage': ((ev.obtainedMarks / ev.totalMarks) * 100).toFixed(2) + '%',
             'Feedback': ev.overallFeedback,
             'Date': new Date(ev.createdAt).toLocaleString()
-        };
+        });
     });
 
-    const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Evaluations');
+
+    // 2. Create a sheet for each class
+    Object.keys(evaluationsByClass).forEach(className => {
+        const ws = XLSX.utils.json_to_sheet(evaluationsByClass[className]);
+
+        // Sanitize sheet name (Excel limits: max 31 chars, no brackets, etc.)
+        const sheetName = className.replace(/[\[\]\*\?\/\\\:]/g, '').substring(0, 31);
+
+        XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Sheet1');
+    });
 
     const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-    const uri = (FileSystem as any).cacheDirectory + 'CheckerQ_Report.xlsx';
+    const uri = (FileSystem as any).cacheDirectory + 'CheckerQ_Report_MultiSheet.xlsx';
 
     try {
         await FileSystem.writeAsStringAsync(uri, wbout, { encoding: (FileSystem as any).EncodingType.Base64 });

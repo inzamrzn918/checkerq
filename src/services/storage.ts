@@ -15,7 +15,9 @@ export interface Assessment {
 export interface Evaluation {
     id: string;
     assessmentId: string;
-    studentImage: string;
+    studentImage?: string; // Legacy support
+    pages?: { uri: string; type: 'cover' | 'answer'; marks?: number[] }[];
+    studentName?: string;
     totalMarks: number;
     obtainedMarks: number;
     overallFeedback: string;
@@ -128,12 +130,14 @@ export const StorageService = {
         const db = await getDB();
         try {
             await db.runAsync(
-                `INSERT OR REPLACE INTO evaluations (id, assessmentId, studentImage, totalMarks, obtainedMarks, overallFeedback, results, createdAt)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT OR REPLACE INTO evaluations (id, assessmentId, studentImage, studentName, pages, totalMarks, obtainedMarks, overallFeedback, results, createdAt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     String(evaluation.id),
                     String(evaluation.assessmentId),
-                    String(evaluation.studentImage),
+                    evaluation.studentImage || '',
+                    evaluation.studentName || 'Unknown Student',
+                    JSON.stringify(evaluation.pages || []),
                     Number(evaluation.totalMarks || 0),
                     Number(evaluation.obtainedMarks || 0),
                     evaluation.overallFeedback || '',
@@ -157,13 +161,15 @@ export const StorageService = {
                 const rows: any[] = await db.getAllAsync(query, [String(assessmentId)]);
                 return rows.map(r => ({
                     ...r,
-                    results: JSON.parse(r.results || '[]')
+                    results: JSON.parse(r.results || '[]'),
+                    pages: JSON.parse(r.pages || '[]')
                 }));
             }
             const rows: any[] = await db.getAllAsync(query, []);
             return rows.map(r => ({
                 ...r,
-                results: JSON.parse(r.results || '[]')
+                results: JSON.parse(r.results || '[]'),
+                pages: JSON.parse(r.pages || '[]')
             }));
         } catch (error) {
             console.error('Error getting evaluations:', error);

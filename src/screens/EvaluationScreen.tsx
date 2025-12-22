@@ -1,21 +1,28 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, ScrollView } from 'react-native';
+import React, { useState, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, ScrollView, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '../theme/theme';
-import { Camera as CameraIcon, ChevronLeft, Scan, ClipboardCheck } from 'lucide-react-native';
-import { GeminiService } from '../services/gemini';
+import { Camera as CameraIcon, ChevronLeft, Scan, ClipboardCheck, ArrowRight, Check, Trash2, Plus } from 'lucide-react-native';
+import { GeminiService, PaperEvaluation } from '../services/gemini';
 import { MistralService } from '../services/mistral';
 import { StorageService, Assessment } from '../services/storage';
 import { useFocusEffect } from '@react-navigation/native';
 
+type Step = 'SELECT' | 'COVER_SCAN' | 'COVER_VERIFY' | 'ANSWER_SCAN' | 'ANSWER_VERIFY' | 'SUMMARY';
+
 export default function EvaluationScreen({ route, navigation }: any) {
+    const [step, setStep] = useState<Step>('SELECT');
     const [assessments, setAssessments] = useState<Assessment[]>([]);
     const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(route.params?.assessment || null);
-    const [answerSheet, setAnswerSheet] = useState<string | null>(null);
-    const [evaluating, setEvaluating] = useState(false);
-    const [evaluationStatus, setEvaluationStatus] = useState('');
-    const [loading, setLoading] = useState(true);
+
+    // Session Data
+    const [studentInfo, setStudentInfo] = useState<{ name: string; rollNo?: string; class?: string }>({ name: '' });
+    const [pages, setPages] = useState<{ uri: string; type: 'cover' | 'answer'; evaluation?: PaperEvaluation }[]>([]);
+    const [currentImage, setCurrentImage] = useState<string | null>(null);
+
+    const [loading, setLoading] = useState(false);
+    const [statusMsg, setStatusMsg] = useState('');
 
     useFocusEffect(
         useCallback(() => {
@@ -24,356 +31,304 @@ export default function EvaluationScreen({ route, navigation }: any) {
                 setAssessments(data);
                 if (route.params?.assessment) {
                     setSelectedAssessment(route.params.assessment);
+                    setStep('COVER_SCAN');
                 }
-                setLoading(false);
             };
             fetchAssessments();
         }, [route.params?.assessment])
     );
 
-    const takePhoto = async () => {
+    const pickImage = async (camera: boolean) => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
             Alert.alert('Permission Denied', 'Camera permission is required');
             return;
         }
 
-        const result = await ImagePicker.launchCameraAsync({
-            quality: 0.8,
-        });
+        const result = camera
+            ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
+            : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
 
         if (!result.canceled) {
-            setAnswerSheet(result.assets[0].uri);
+            setCurrentImage(result.assets[0].uri);
+            if (step === 'COVER_SCAN') processCoverPage(result.assets[0].uri);
+            if (step === 'ANSWER_SCAN') processAnswerPage(result.assets[0].uri);
         }
     };
 
-    const uploadFromGallery = async () => {
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            quality: 0.8,
-        });
-
-        if (!result.canceled) {
-            setAnswerSheet(result.assets[0].uri);
+    const processCoverPage = async (uri: string) => {
+        setLoading(true);
+        setStatusMsg('Extracting Student Info...');
+        try {
+            const info = await GeminiService.extractStudentInfo(uri);
+            setStudentInfo({
+                name: info.name || '',
+                rollNo: info.rollNo,
+                class: info.class
+            });
+            setStatusMsg('');
+            setStep('COVER_VERIFY');
+        } catch (error) {
+            console.error(error);
+            Alert.alert('Error', 'Failed to extract info. Please enter manually.');
+            setStep('COVER_VERIFY');
+        } finally {
+            setLoading(false);
         }
     };
 
-    const startEvaluation = async () => {
-        if (!answerSheet || !selectedAssessment) return;
+    const confirmCoverPage = () => {
+        setPages([...pages, { uri: currentImage!, type: 'cover' }]);
+        setCurrentImage(null);
+        setStep('ANSWER_SCAN');
+    };
 
-        setEvaluating(true);
-        setEvaluationStatus('Extracting text (Mistral OCR)...');
+    const processAnswerPage = async (uri: string) => {
+        if (!selectedAssessment) return;
+        setLoading(true);
+        setStatusMsg('Evaluating Answer Sheet...');
 
         try {
-            // Step 1: Extract Text via Mistral
-            const extractedText = await MistralService.extractText(answerSheet);
-            console.log("Mistral Extracted Text:", extractedText.substring(0, 100) + "...");
+            // 1. OCR
+            setStatusMsg('Reading handwriting (Mistral)...');
+            const text = await MistralService.extractText(uri);
 
-            setEvaluationStatus('Grading answers (Gemini)...');
+            // 2. Evaluate
+            setStatusMsg('Grading (Gemini)...');
+            const evalResult = await GeminiService.evaluatePaperText(text, selectedAssessment.questions);
 
-            // Step 2: Evaluate Text via Gemini
-            const evaluation = await GeminiService.evaluatePaperText(extractedText, selectedAssessment.questions);
-
-            // We pass the full assessment object so results screen can show question details
-            navigation.navigate('EvaluationResult', { evaluation, assessment: selectedAssessment, answerSheet });
+            // Add to pages temporarily for verification
+            setPages([...pages, { uri, type: 'answer', evaluation: evalResult }]);
+            setStep('SUMMARY'); // For now, go straight to summary/next loop, typically we'd verify each page
         } catch (error) {
-            Alert.alert('Error', 'Evaluation failed. Please try again.');
-            console.error(error);
+            Alert.alert('Evaluation Failed', 'Try again or skip this page.');
         } finally {
-            setEvaluating(false);
-            setEvaluationStatus('');
+            setLoading(false);
+            setCurrentImage(null);
         }
     };
 
+    const handleFinish = async () => {
+        // Aggregate results
+        const answerPages = pages.filter(p => p.type === 'answer');
+        const aggregatedEval = {
+            id: Math.random().toString(36).substr(2, 9),
+            assessmentId: selectedAssessment!.id,
+            studentImage: pages.length > 0 ? pages[0].uri : '', // cover or first page
+            pages: pages,
+            studentName: studentInfo.name,
+            totalMarks: selectedAssessment!.questions.reduce((sum, q) => sum + q.marks, 0),
+            obtainedMarks: answerPages.reduce((sum, p) => sum + (p.evaluation?.obtainedMarks || 0), 0),
+            overallFeedback: "Evaluated across " + answerPages.length + " pages.",
+            results: answerPages.flatMap(p => p.evaluation?.results || []),
+            createdAt: Date.now()
+        };
+
+        // Navigate to result screen for final save
+        navigation.navigate('EvaluationResult', {
+            evaluation: aggregatedEval,
+            assessment: selectedAssessment,
+            answerSheet: aggregatedEval.studentImage // pass cover as main image for now
+        });
+    };
+
+    const renderSelectAssessment = () => (
+        <View style={styles.selectionCard}>
+            <Text style={styles.sectionTitle}>Select Exam</Text>
+            <ScrollView style={{ maxHeight: 400 }}>
+                {assessments.map(a => (
+                    <TouchableOpacity
+                        key={a.id}
+                        style={styles.pickerItem}
+                        onPress={() => {
+                            setSelectedAssessment(a);
+                            setStep('COVER_SCAN');
+                        }}
+                    >
+                        <Text style={styles.pickerTitle}>{a.title}</Text>
+                        <Text style={styles.pickerSub}>{a.subject} • {a.classRoom}</Text>
+                    </TouchableOpacity>
+                ))}
+            </ScrollView>
+        </View>
+    );
+
+    const renderCoverVerify = () => (
+        <View style={styles.verifyContainer}>
+            <Text style={styles.stepTitle}>Confirm Student Details</Text>
+            <Image source={{ uri: currentImage! }} style={styles.miniPreview} />
+
+            <View style={styles.formGroup}>
+                <Text style={styles.label}>Student Name</Text>
+                <TextInput
+                    style={styles.input}
+                    value={studentInfo.name}
+                    onChangeText={t => setStudentInfo({ ...studentInfo, name: t })}
+                    placeholder="Enter Name"
+                />
+            </View>
+            <View style={styles.formGroup}>
+                <Text style={styles.label}>Roll No / ID</Text>
+                <TextInput
+                    style={styles.input}
+                    value={studentInfo.rollNo}
+                    onChangeText={t => setStudentInfo({ ...studentInfo, rollNo: t })}
+                    placeholder="Enter Roll No"
+                />
+            </View>
+
+            <TouchableOpacity style={styles.primaryBtn} onPress={confirmCoverPage}>
+                <Text style={styles.btnText}>Confirm & Start Scanning Answers</Text>
+                <ArrowRight color="#fff" size={20} />
+            </TouchableOpacity>
+        </View>
+    );
+
+    const renderScanner = (mode: 'COVER' | 'ANSWER') => (
+        <View style={styles.scannerInterface}>
+            <View style={styles.scanTarget}>
+                <Scan color={theme.colors.border} size={80} />
+                <Text style={styles.scanHint}>
+                    {mode === 'COVER' ? 'Scan the Cover Page (Student Info)' : 'Scan an Answer Page'}
+                </Text>
+            </View>
+
+            <View style={styles.controls}>
+                <TouchableOpacity style={styles.circleBtn} onPress={() => pickImage(false)}>
+                    <Image source={{ uri: 'https://img.icons8.com/ios-filled/50/ffffff/gallery.png' }} style={{ width: 24, height: 24, tintColor: '#fff' }} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.captureBtn} onPress={() => pickImage(true)}>
+                    <CameraIcon color="#fff" size={32} />
+                </TouchableOpacity>
+                <View style={styles.circleBtn} />
+            </View>
+
+            {/* Skip Cover Option */}
+            {mode === 'COVER' && (
+                <TouchableOpacity onPress={() => setStep('ANSWER_SCAN')} style={{ marginTop: 20 }}>
+                    <Text style={{ color: theme.colors.textSecondary }}>Skip Cover Page</Text>
+                </TouchableOpacity>
+            )}
+
+            {mode === 'ANSWER' && pages.length > 0 && (
+                <TouchableOpacity onPress={() => setStep('SUMMARY')} style={styles.finishLink}>
+                    <Text style={styles.finishLinkText}>Finish Scanning ({pages.filter(p => p.type === 'answer').length} pages done)</Text>
+                </TouchableOpacity>
+            )}
+        </View>
+    );
+
+    const renderSummary = () => (
+        <View style={styles.summaryContainer}>
+            <Text style={styles.stepTitle}>Scanned Pages</Text>
+            <Text style={styles.summarySub}>Total Pages: {pages.length}</Text>
+
+            <ScrollView horizontal style={styles.pageList}>
+                {pages.map((p, i) => (
+                    <View key={i} style={styles.pageCard}>
+                        <Image source={{ uri: p.uri }} style={styles.pageThumb} />
+                        <View style={styles.pageBadge}>
+                            <Text style={styles.pageBadgeText}>{p.type === 'cover' ? 'Cover' : `Page ${i}`}</Text>
+                        </View>
+                        {p.evaluation && (
+                            <View style={styles.markBadge}>
+                                <Text style={styles.markText}>{p.evaluation.obtainedMarks} Marks</Text>
+                            </View>
+                        )}
+                    </View>
+                ))}
+            </ScrollView>
+
+            <TouchableOpacity style={styles.addPageBtn} onPress={() => setStep('ANSWER_SCAN')}>
+                <Plus color={theme.colors.primary} size={20} />
+                <Text style={styles.addPageText}>Scan Another Page</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleFinish}>
+                <Text style={styles.btnText}>Complete Evaluation</Text>
+                <Check color="#fff" size={20} />
+            </TouchableOpacity>
+        </View>
+    );
+
+    // Main Render
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <ChevronLeft color={theme.colors.text} size={28} />
                 </TouchableOpacity>
-                <Text style={styles.title}>Scan Answer Sheet</Text>
+                <Text style={styles.title}>
+                    {step === 'SELECT' ? 'New Evaluation' : selectedAssessment?.title}
+                </Text>
                 <View style={{ width: 28 }} />
             </View>
 
-            <ScrollView contentContainerStyle={styles.content}>
-                <View style={styles.statusBox}>
-                    <ClipboardCheck color={theme.colors.primary} size={24} />
-                    <View style={styles.statusInfo}>
-                        <Text style={styles.statusLabel}>Evaluating for:</Text>
-                        <Text style={styles.statusValue}>
-                            {selectedAssessment?.title || 'No Assessment Selected'}
-                        </Text>
-                    </View>
+            {loading ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={styles.loadingText}>{statusMsg}</Text>
                 </View>
-
-                {!selectedAssessment ? (
-                    <View style={styles.selectionCard}>
-                        <Text style={styles.selectionTitle}>Select an Assessment</Text>
-                        <Text style={styles.selectionSub}>You must pick a question paper template before scanning answers.</Text>
-
-                        {assessments.length === 0 ? (
-                            <TouchableOpacity
-                                style={styles.createBtn}
-                                onPress={() => navigation.navigate('SetupAssessment')}
-                            >
-                                <Text style={styles.createBtnText}>+ Create New Assessment</Text>
-                            </TouchableOpacity>
-                        ) : (
-                            <ScrollView style={styles.pickerList} nestedScrollEnabled>
-                                {assessments.map(a => (
-                                    <TouchableOpacity
-                                        key={a.id}
-                                        style={styles.pickerItem}
-                                        onPress={() => setSelectedAssessment(a)}
-                                    >
-                                        <Text style={styles.pickerItemTitle}>{a.title}</Text>
-                                        <Text style={styles.pickerItemSub}>{a.subject} • {a.questions.length} Qs</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        )}
-                    </View>
-                ) : !answerSheet ? (
-                    <View style={styles.scannerInterface}>
-                        <View style={styles.scanTarget}>
-                            <Scan color={theme.colors.border} size={100} strokeWidth={1} />
-                            <Text style={styles.scanHint}>Align answer sheet within the frame</Text>
-                        </View>
-
-                        <TouchableOpacity style={styles.changeAssessmentBtn} onPress={() => setSelectedAssessment(null)}>
-                            <Text style={styles.changeAssessmentText}>Change Assessment</Text>
-                        </TouchableOpacity>
-
-                        <View style={styles.controls}>
-                            <TouchableOpacity style={styles.circleBtn} onPress={uploadFromGallery}>
-                                <Image source={{ uri: 'https://img.icons8.com/ios-filled/50/ffffff/gallery.png' }} style={{ width: 24, height: 24, tintColor: '#fff' }} />
-                            </TouchableOpacity>
-
-                            <TouchableOpacity style={styles.captureBtn} onPress={takePhoto}>
-                                <View style={styles.captureBtnInner}>
-                                    <CameraIcon color="#fff" size={32} />
-                                </View>
-                            </TouchableOpacity>
-
-                            <View style={styles.circleBtn} />
-                        </View>
-                    </View>
-                ) : (
-                    <View style={styles.previewContainer}>
-                        <Image source={{ uri: answerSheet }} style={styles.preview} />
-                        <TouchableOpacity style={styles.retakeBtn} onPress={() => setAnswerSheet(null)}>
-                            <Text style={styles.retakeBtnText}>Retake Photo</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[styles.evaluateBtn, evaluating && styles.disabledBtn]}
-                            onPress={startEvaluation}
-                            disabled={evaluating}
-                        >
-                            {evaluating ? (
-                                <View style={{ alignItems: 'center' }}>
-                                    <ActivityIndicator color="#fff" />
-                                    <Text style={{ color: '#ffffffcc', marginTop: 8, fontSize: 12 }}>{evaluationStatus}</Text>
-                                </View>
-                            ) : (
-                                <>
-                                    <Text style={styles.evaluateBtnText}>Evaluate Now</Text>
-                                    <Text style={styles.evaluateBtnSub}>Uses AI to grade handwritten answers</Text>
-                                </>
-                            )}
-                        </TouchableOpacity>
-                    </View>
-                )}
-            </ScrollView>
+            ) : (
+                <ScrollView contentContainerStyle={styles.content}>
+                    {step === 'SELECT' && renderSelectAssessment()}
+                    {step === 'COVER_SCAN' && renderScanner('COVER')}
+                    {step === 'COVER_VERIFY' && renderCoverVerify()}
+                    {step === 'ANSWER_SCAN' && renderScanner('ANSWER')}
+                    {step === 'SUMMARY' && renderSummary()}
+                </ScrollView>
+            )}
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: theme.colors.background,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: theme.spacing.lg,
-    },
-    title: {
-        color: theme.colors.text,
-        fontSize: 20,
-        fontWeight: '700',
-    },
-    content: {
-        padding: theme.spacing.lg,
-    },
-    statusBox: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: theme.colors.surface,
-        padding: 16,
-        borderRadius: 16,
-        marginBottom: 24,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    statusInfo: {
-        marginLeft: 12,
-    },
-    statusLabel: {
-        color: theme.colors.textSecondary,
-        fontSize: 12,
-    },
-    statusValue: {
-        color: theme.colors.text,
-        fontWeight: '700',
-        fontSize: 16,
-    },
-    scannerInterface: {
-        alignItems: 'center',
-        marginTop: 40,
-    },
-    scanTarget: {
-        width: '100%',
-        aspectRatio: 3 / 4,
-        backgroundColor: theme.colors.surface,
-        borderRadius: 20,
-        borderWidth: 2,
-        borderColor: theme.colors.primary,
-        borderStyle: 'dashed',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    scanHint: {
-        color: theme.colors.textSecondary,
-        marginTop: 20,
-    },
-    selectionCard: {
-        backgroundColor: theme.colors.surface,
-        padding: 24,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    selectionTitle: {
-        color: theme.colors.text,
-        fontSize: 20,
-        fontWeight: '700',
-        textAlign: 'center',
-        marginBottom: 8,
-    },
-    selectionSub: {
-        color: theme.colors.textSecondary,
-        fontSize: 14,
-        textAlign: 'center',
-        lineHeight: 20,
-        marginBottom: 24,
-    },
-    pickerList: {
-        maxHeight: 300,
-    },
-    pickerItem: {
-        padding: 16,
-        backgroundColor: theme.colors.background,
-        borderRadius: 12,
-        marginBottom: 10,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    pickerItemTitle: {
-        color: theme.colors.text,
-        fontWeight: '600',
-        fontSize: 16,
-    },
-    pickerItemSub: {
-        color: theme.colors.textSecondary,
-        fontSize: 12,
-        marginTop: 2,
-    },
-    createBtn: {
-        backgroundColor: theme.colors.primary,
-        padding: 16,
-        borderRadius: 12,
-        alignItems: 'center',
-    },
-    createBtnText: {
-        color: '#fff',
-        fontWeight: '700',
-    },
-    changeAssessmentBtn: {
-        padding: 16,
-    },
-    changeAssessmentText: {
-        color: theme.colors.primary,
-        fontWeight: '600',
-    },
-    controls: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 40,
-        marginTop: 40,
-    },
-    captureBtn: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: theme.colors.primary + '30',
-        padding: 6,
-    },
-    captureBtnInner: {
-        flex: 1,
-        borderRadius: 34,
-        backgroundColor: theme.colors.primary,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    circleBtn: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        backgroundColor: theme.colors.surface,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    previewContainer: {
-        alignItems: 'center',
-    },
-    preview: {
-        width: '100%',
-        height: 450,
-        borderRadius: 20,
-    },
-    retakeBtn: {
-        marginTop: 20,
-        padding: 12,
-    },
-    retakeBtnText: {
-        color: theme.colors.textSecondary,
-        fontWeight: '600',
-    },
-    evaluateBtn: {
-        backgroundColor: theme.colors.primary,
-        width: '100%',
-        padding: 20,
-        borderRadius: 16,
-        alignItems: 'center',
-        marginTop: 20,
-        ...theme.shadows.md,
-    },
-    disabledBtn: {
-        backgroundColor: theme.colors.border,
-    },
-    evaluateBtnText: {
-        color: '#fff',
-        fontSize: 20,
-        fontWeight: 'bold',
-    },
-    evaluateBtnSub: {
-        color: '#ffffff80',
-        fontSize: 12,
-        marginTop: 4,
-    }
+    container: { flex: 1, backgroundColor: theme.colors.background },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: theme.spacing.lg },
+    title: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
+    content: { padding: theme.spacing.lg },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    loadingText: { marginTop: 16, color: theme.colors.textSecondary },
+
+    // Select
+    selectionCard: { backgroundColor: theme.colors.surface, borderRadius: 16, padding: 16 },
+    sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 12, color: theme.colors.text },
+    pickerItem: { padding: 16, borderBottomWidth: 1, borderBottomColor: theme.colors.border },
+    pickerTitle: { fontSize: 16, fontWeight: '600', color: theme.colors.text },
+    pickerSub: { fontSize: 12, color: theme.colors.textSecondary },
+
+    // Scanner
+    scannerInterface: { alignItems: 'center', marginTop: 40 },
+    scanTarget: { width: 300, height: 400, borderWidth: 2, borderColor: theme.colors.primary, borderStyle: 'dashed', borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.surface },
+    scanHint: { marginTop: 16, color: theme.colors.textSecondary },
+    controls: { flexDirection: 'row', alignItems: 'center', gap: 32, marginTop: 40 },
+    captureBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center' },
+    circleBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, justifyContent: 'center', alignItems: 'center' },
+    finishLink: { marginTop: 32, padding: 12, backgroundColor: theme.colors.surface, borderRadius: 8 },
+    finishLinkText: { color: theme.colors.primary, fontWeight: '600' },
+
+    // Forms
+    verifyContainer: { padding: 16 },
+    stepTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 24, color: theme.colors.text },
+    miniPreview: { width: 100, height: 140, borderRadius: 8, alignSelf: 'center', marginBottom: 24, backgroundColor: '#eee' },
+    formGroup: { marginBottom: 16 },
+    label: { fontSize: 12, color: theme.colors.textSecondary, marginBottom: 4, textTransform: 'uppercase', fontWeight: 'bold' },
+    input: { backgroundColor: theme.colors.surface, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, fontSize: 16, color: theme.colors.text },
+
+    primaryBtn: { backgroundColor: theme.colors.primary, padding: 16, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 16 },
+    btnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
+    // Summary
+    summaryContainer: {},
+    summarySub: { color: theme.colors.textSecondary, marginBottom: 16 },
+    pageList: { flexDirection: 'row', marginBottom: 24 },
+    pageCard: { width: 120, marginRight: 12 },
+    pageThumb: { width: 120, height: 160, borderRadius: 8, backgroundColor: '#eee' },
+    pageBadge: { position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.6)', padding: 4, borderRadius: 4 },
+    pageBadgeText: { color: '#fff', fontSize: 10 },
+    markBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: theme.colors.success, padding: 4, borderRadius: 4 },
+    markText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+
+    addPageBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 16, borderWidth: 1, borderColor: theme.colors.primary, borderRadius: 12, borderStyle: 'dashed', marginBottom: 16 },
+    addPageText: { color: theme.colors.primary, fontWeight: '600' },
 });

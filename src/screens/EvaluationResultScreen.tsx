@@ -1,18 +1,26 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Image, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme/theme';
 import { ChevronLeft, CheckCircle, Award, Share2, Plus, Minus, Download, Save } from 'lucide-react-native';
-import { PaperEvaluation, Question as GeminiQuestion } from '../services/gemini';
+import { PaperEvaluation } from '../services/gemini';
 import { StorageService, Assessment, Evaluation } from '../services/storage';
 import { exportGradeCardToPDF } from '../utils/export';
+import { MarkOverlay } from '../components/MarkOverlay';
+
+const { width } = Dimensions.get('window');
 
 export default function EvaluationResultScreen({ route, navigation }: any) {
+    // Params validation
     const { evaluation: initialEval, assessment, answerSheet, isResuming }: { evaluation: any, assessment: Assessment, answerSheet: string, isResuming?: boolean } = route.params;
     const [evaluation, setEvaluation] = React.useState(initialEval);
     const [isSaving, setIsSaving] = React.useState(false);
 
+    // Identify if this is a new or existing evaluation
     const isExisting = !!initialEval.id && initialEval.id !== 'temp';
+
+    // Normalize pages
+    const pages = evaluation.pages || (evaluation.studentImage ? [{ uri: evaluation.studentImage, type: 'answer' }] : []);
 
     const scorePercentage = (evaluation.obtainedMarks / evaluation.totalMarks) * 100;
 
@@ -36,6 +44,7 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
         res.obtainedMarks = newMark;
         newResults[resIdx] = res;
 
+        // Recalculate total
         const newTotalObtained = newResults.reduce((acc, curr) => acc + curr.obtainedMarks, 0);
 
         setEvaluation({
@@ -51,7 +60,9 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
             const evalData: Evaluation = {
                 id: isExisting ? initialEval.id : Math.random().toString(36).substr(2, 9),
                 assessmentId: assessment.id,
-                studentImage: answerSheet,
+                studentImage: pages.length > 0 ? pages[0].uri : answerSheet, // First page as thumbnail
+                pages: pages,
+                studentName: evaluation.studentName,
                 totalMarks: evaluation.totalMarks,
                 obtainedMarks: evaluation.obtainedMarks,
                 overallFeedback: evaluation.overallFeedback,
@@ -59,13 +70,7 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
                 createdAt: evaluation.createdAt || Date.now()
             };
 
-            if (isExisting) {
-                // In a real app we might need an updateEvaluation method, 
-                // but saveEvaluation uses INSERT OR REPLACE if we set it up correctly in storage.ts
-                await StorageService.saveEvaluation(evalData);
-            } else {
-                await StorageService.saveEvaluation(evalData);
-            }
+            await StorageService.saveEvaluation(evalData);
             navigation.navigate('Home');
         } catch (error) {
             console.error('Save failed:', error);
@@ -76,16 +81,7 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
 
     const handleExport = async () => {
         try {
-            const evForStorage = {
-                id: 'temp',
-                assessmentId: assessment.id,
-                studentImage: answerSheet,
-                totalMarks: evaluation.totalMarks,
-                obtainedMarks: evaluation.obtainedMarks,
-                overallFeedback: evaluation.overallFeedback,
-                results: evaluation.results,
-                createdAt: Date.now()
-            };
+            const evForStorage = { ...evaluation, id: 'temp', createdAt: Date.now() };
             await exportGradeCardToPDF(evForStorage, assessment);
         } catch (error) {
             console.error('Export failed:', error);
@@ -105,6 +101,28 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
+
+                {/* Pages Preview with Overlays */}
+                <Text style={styles.sectionTitle}>Evaluated Pages</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pagesScroll}>
+                    {pages.map((page: any, idx: number) => (
+                        <View key={idx} style={styles.pagePreviewCard}>
+                            <Image source={{ uri: page.uri }} style={styles.pageImage} />
+                            {page.type === 'answer' && (
+                                <MarkOverlay
+                                    results={page.evaluation?.results || evaluation.results}
+                                    questions={assessment.questions}
+                                    height={300}
+                                    width={220}
+                                />
+                            )}
+                            <View style={styles.pageLabel}>
+                                <Text style={styles.pageLabelText}>{page.type === 'cover' ? 'Info' : `Page ${idx + (pages[0].type === 'cover' ? 0 : 1)}`}</Text>
+                            </View>
+                        </View>
+                    ))}
+                </ScrollView>
+
                 <View style={styles.scoreSection}>
                     <View style={[styles.scoreBadge, { borderColor: getScoreColor() }]}>
                         <Text style={[styles.scoreText, { color: getScoreColor() }]}>
@@ -114,6 +132,18 @@ export default function EvaluationResultScreen({ route, navigation }: any) {
                     </View>
 
                     <Award color={getScoreColor()} size={48} style={styles.medalIcon} />
+                </View>
+
+                {/* Student Name Edit Section */}
+                <View style={styles.studentNameContainer}>
+                    <Text style={styles.studentNameLabel}>Student Name</Text>
+                    <TextInput
+                        style={styles.studentNameInput}
+                        value={evaluation?.studentName || ''}
+                        onChangeText={(text) => setEvaluation({ ...evaluation, studentName: text })}
+                        placeholder="Enter Student Name"
+                        placeholderTextColor={theme.colors.textSecondary}
+                    />
                 </View>
 
                 <View style={styles.feedbackCard}>
@@ -195,6 +225,33 @@ const styles = StyleSheet.create({
     content: {
         padding: theme.spacing.lg,
     },
+    pagesScroll: {
+        marginBottom: 24,
+    },
+    pagePreviewCard: {
+        width: 220,
+        marginRight: 16,
+    },
+    pageImage: {
+        width: 220,
+        height: 300,
+        borderRadius: 12,
+        backgroundColor: '#eee',
+    },
+    pageLabel: {
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+    },
+    pageLabelText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: '600'
+    },
     scoreSection: {
         alignItems: 'center',
         marginVertical: 32,
@@ -222,6 +279,30 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: -10,
         right: '25%',
+    },
+    studentNameContainer: {
+        width: '100%',
+        backgroundColor: theme.colors.surface,
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    studentNameLabel: {
+        color: theme.colors.textSecondary,
+        fontSize: 12,
+        fontWeight: '600',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+    },
+    studentNameInput: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: theme.colors.text,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.border,
+        paddingBottom: 8,
     },
     feedbackCard: {
         backgroundColor: theme.colors.surface,
