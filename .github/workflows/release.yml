@@ -1,4 +1,4 @@
-name: Create Release
+name: Create Android Release
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -18,7 +18,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: 18
+          cache: npm
 
       - name: Install dependencies
         run: npm install
@@ -28,41 +29,60 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
+          echo "App version: $VERSION"
 
-      - name: Setup Expo and EAS
+      - name: Install Expo & EAS
         run: npm install -g eas-cli
 
-      - name: Build and Download APK
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # ---------- APK BUILD ----------
+      - name: Build APK (Preview)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          # Start the build and capture output
-          eas build --platform android --profile preview --non-interactive --wait > build-log.txt 2>&1
-          
-          # Extract build ID from the output
-          BUILD_ID=$(grep -oP 'builds/[a-f0-9-]+' build-log.txt | head -1 | cut -d'/' -f2)
-          echo "Build ID: $BUILD_ID"
-          
-          # Download using the build ID
-          curl -H "Authorization: Bearer $EXPO_TOKEN" \
-               -L "https://api.expo.dev/v2/artifacts/$BUILD_ID" \
-               -o artifact-info.json
-          
-          # Extract download URL
-          DOWNLOAD_URL=$(cat artifact-info.json | jq -r '.url')
-          echo "Download URL: $DOWNLOAD_URL"
-          
-          # Download the APK
-          curl -L -o CheckerQ-v${{ steps.get_version.outputs.version }}.apk "$DOWNLOAD_URL"
-          
-          # Verify file exists and has size
+          eas build \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --wait \
+            --json > apk-build.json
+
+          APK_URL=$(jq -r '.[0].artifacts.buildUrl' apk-build.json)
+
+          echo "APK URL: $APK_URL"
+          curl -L -o CheckerQ-v${{ steps.get_version.outputs.version }}.apk "$APK_URL"
+
           ls -lh CheckerQ-v${{ steps.get_version.outputs.version }}.apk
 
-      - name: Create Release
+      # ---------- AAB BUILD ----------
+      - name: Build AAB (Production)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build \
+            --platform android \
+            --profile production \
+            --non-interactive \
+            --wait \
+            --json > aab-build.json
+
+          AAB_URL=$(jq -r '.[0].artifacts.buildUrl' aab-build.json)
+
+          echo "AAB URL: $AAB_URL"
+          curl -L -o CheckerQ-v${{ steps.get_version.outputs.version }}.aab "$AAB_URL"
+
+          ls -lh CheckerQ-v${{ steps.get_version.outputs.version }}.aab
+
+      # ---------- RELEASE ----------
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: CheckerQ-v${{ steps.get_version.outputs.version }}.apk
+          name: CheckerQ v${{ steps.get_version.outputs.version }}
+          files: |
+            CheckerQ-v${{ steps.get_version.outputs.version }}.apk
+            CheckerQ-v${{ steps.get_version.outputs.version }}.aab
           generate_release_notes: true
           draft: false
           prerelease: false
