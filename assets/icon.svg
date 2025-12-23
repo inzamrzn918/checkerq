@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="200" fill="#0F172A"/>
+  
+  <!-- Clipboard Body -->
+  <rect x="262" y="180" width="500" height="664" rx="40" fill="white"/>
+  <rect x="292" y="210" width="440" height="604" rx="20" fill="#F1F5F9"/>
+  
+  <!-- Clipboard Header/Clip -->
+  <path d="M412 140H612C634.091 140 652 157.909 652 180V220H372V180C372 157.909 389.909 140 412 140Z" fill="#334155"/>
+  <circle cx="512" cy="180" r="24" fill="#E2E8F0"/>
+  
+  <!-- AI Brain / Circuitry Elements (Top Right) -->
+  <path d="M650 300C680 300 710 320 710 360" stroke="#06B6D4" stroke-width="12" stroke-linecap="round"/>
+  <path d="M670 280C685 280 730 290 730 350" stroke="#06B6D4" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="730" cy="350" r="8" fill="#06B6D4"/>
+  <circle cx="710" cy="360" r="8" fill="#06B6D4"/>
+  <path d="M630 320L660 350" stroke="#06B6D4" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Checkmark (Prominent) -->
+  <path d="M362 500L492 630L762 360" stroke="#22C55E" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Text/Branding (Optional, mostly for logo not icon, but keeps it recognizable) -->
+</svg>
