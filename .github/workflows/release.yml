@@ -15,6 +15,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
       - name: Extract version from package.json
         id: get_version
         run: |
@@ -22,17 +27,22 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
-      - name: Rename APK with version
+      - name: Setup Expo and EAS
         run: |
-          cp release/CheckerQ.apk release/CheckerQ-v${{ steps.get_version.outputs.version }}.apk
+          npm install -g eas-cli
+          eas login --non-interactive
+
+      - name: Build APK with EAS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build --platform android --profile preview --non-interactive --wait
+          eas build:download --platform android --profile preview --output CheckerQ-v${{ steps.get_version.outputs.version }}.apk
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: |
-            release/CheckerQ.apk
-            release/CheckerQ-v${{ steps.get_version.outputs.version }}.apk
+          files: CheckerQ-v${{ steps.get_version.outputs.version }}.apk
           generate_release_notes: true
           draft: false
           prerelease: false
