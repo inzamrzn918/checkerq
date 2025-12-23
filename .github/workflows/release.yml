@@ -37,8 +37,9 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          eas build --platform android --profile preview --non-interactive --wait
-          eas build:download --platform=android --latest --output=CheckerQ-v${{ steps.get_version.outputs.version }}.apk
+          eas build --platform android --profile preview --non-interactive --wait --json > build-output.json
+          BUILD_URL=$(cat build-output.json | jq -r '.artifacts.buildUrl')
+          curl -L -o CheckerQ-v${{ steps.get_version.outputs.version }}.apk "$BUILD_URL"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
