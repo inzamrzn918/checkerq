@@ -33,13 +33,31 @@ jobs:
       - name: Setup Expo and EAS
         run: npm install -g eas-cli
 
-      - name: Build APK with EAS
+      - name: Build and Download APK
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          eas build --platform android --profile preview --non-interactive --wait --json > build-output.json
-          BUILD_URL=$(cat build-output.json | jq -r '.artifacts.buildUrl')
-          curl -L -o CheckerQ-v${{ steps.get_version.outputs.version }}.apk "$BUILD_URL"
+          # Start the build and capture output
+          eas build --platform android --profile preview --non-interactive --wait > build-log.txt 2>&1
+          
+          # Extract build ID from the output
+          BUILD_ID=$(grep -oP 'builds/[a-f0-9-]+' build-log.txt | head -1 | cut -d'/' -f2)
+          echo "Build ID: $BUILD_ID"
+          
+          # Download using the build ID
+          curl -H "Authorization: Bearer $EXPO_TOKEN" \
+               -L "https://api.expo.dev/v2/artifacts/$BUILD_ID" \
+               -o artifact-info.json
+          
+          # Extract download URL
+          DOWNLOAD_URL=$(cat artifact-info.json | jq -r '.url')
+          echo "Download URL: $DOWNLOAD_URL"
+          
+          # Download the APK
+          curl -L -o CheckerQ-v${{ steps.get_version.outputs.version }}.apk "$DOWNLOAD_URL"
+          
+          # Verify file exists and has size
+          ls -lh CheckerQ-v${{ steps.get_version.outputs.version }}.apk
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
