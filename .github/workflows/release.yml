@@ -38,7 +38,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           eas build --platform android --profile preview --non-interactive --wait
-          eas build:download --platform android --profile preview --output CheckerQ-v${{ steps.get_version.outputs.version }}.apk
+          eas build:download --platform=android --latest --output=CheckerQ-v${{ steps.get_version.outputs.version }}.apk
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
