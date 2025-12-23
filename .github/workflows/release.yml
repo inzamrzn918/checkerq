@@ -28,9 +28,7 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Setup Expo and EAS
-        run: |
-          npm install -g eas-cli
-          eas login --non-interactive
+        run: npm install -g eas-cli
 
       - name: Build APK with EAS
         env:
