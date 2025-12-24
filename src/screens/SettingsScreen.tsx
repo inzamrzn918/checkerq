@@ -1,31 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Linking, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Linking, ActivityIndicator, ScrollView, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { ChevronLeft, Save, Key } from 'lucide-react-native';
+import { ChevronLeft, Save, Key, Trash2, ExternalLink, Download, Upload, Cloud, Database } from 'lucide-react-native';
 import { settingsService } from '../services/settings';
+import { BackupService } from '../services/backup';
+import { showError, showSuccess, showConfirm } from '../utils/errorHandler';
 
 export default function SettingsScreen({ navigation }: any) {
     const [geminiKey, setGeminiKey] = useState('');
     const [mistralKey, setMistralKey] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [backupPrefs, setBackupPrefs] = useState<any>(null);
+    const [backupLoading, setBackupLoading] = useState(false);
 
-    useEffect(() => {
-        loadKeys();
-    }, []);
+    // Removed the initial useEffect that called loadKeys() as loadData will handle everything on focus.
 
-    const loadKeys = async () => {
+    useFocusEffect(
+        useCallback(() => {
+            loadData();
+        }, [])
+    );
+
+    const loadData = async () => {
+        setLoading(true);
         try {
             const keys = await settingsService.getApiKeys();
+            const prefs = await settingsService.getBackupPreferences();
             setGeminiKey(keys.gemini || '');
             setMistralKey(keys.mistral || '');
+            setBackupPrefs(prefs);
         } catch (error) {
-            Alert.alert('Error', 'Failed to load API keys');
+            Alert.alert('Error', 'Failed to load settings.');
         } finally {
             setLoading(false);
         }
     };
+
+    // Removed the original loadKeys function as its logic is now part of loadData.
+    // Removed the original loadBackupPreferences function as its logic is now part of loadData.
 
     const saveSettings = async () => {
         if (!geminiKey.trim()) {

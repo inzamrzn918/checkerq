@@ -8,6 +8,17 @@ export interface ApiKeys {
     mistral?: string;
 }
 
+interface BackupPreferences {
+    autoBackupEnabled: boolean;
+    backupFrequency: 'daily' | 'weekly' | 'manual';
+    lastBackupTime?: string;
+    googleDriveConnected: boolean;
+    googleDriveEmail?: string;
+}
+
+const API_KEYS_KEY = 'api_keys';
+const BACKUP_PREFS_KEY = 'backup_preferences';
+
 export const settingsService = {
     /**
      * Get stored API keys
@@ -68,6 +79,47 @@ export const settingsService = {
      * Check if app can be used (has valid keys)
      */
     async canUseApp(): Promise<boolean> {
-        return await this.hasValidKeys();
+        return this.hasValidKeys();
+    },
+
+    // Backup Preferences
+    async getBackupPreferences(): Promise<BackupPreferences> {
+        try {
+            const prefs = await SecureStore.getItemAsync(BACKUP_PREFS_KEY);
+            if (prefs) {
+                return JSON.parse(prefs);
+            }
+            return {
+                autoBackupEnabled: false,
+                backupFrequency: 'manual',
+                googleDriveConnected: false,
+            };
+        } catch (error) {
+            console.error('Error getting backup preferences:', error);
+            return {
+                autoBackupEnabled: false,
+                backupFrequency: 'manual',
+                googleDriveConnected: false,
+            };
+        }
+    },
+
+    async setBackupPreferences(prefs: BackupPreferences): Promise<void> {
+        try {
+            await SecureStore.setItemAsync(BACKUP_PREFS_KEY, JSON.stringify(prefs));
+        } catch (error) {
+            console.error('Error setting backup preferences:', error);
+            throw error;
+        }
+    },
+
+    async updateLastBackupTime(): Promise<void> {
+        try {
+            const prefs = await this.getBackupPreferences();
+            prefs.lastBackupTime = new Date().toISOString();
+            await this.setBackupPreferences(prefs);
+        } catch (error) {
+            console.error('Error updating last backup time:', error);
+        }
     },
 };

@@ -1,7 +1,7 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Assessment, Evaluation } from '../services/storage';
 
 export const exportGradeCardToPDF = async (evaluation: Evaluation, assessment: Assessment) => {
@@ -126,10 +126,10 @@ export const exportAllAssessmentsToExcel = async (assessments: Assessment[], eva
     });
 
     const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-    const uri = (FileSystem as any).cacheDirectory + 'CheckerQ_Report_MultiSheet.xlsx';
+    const uri = FileSystem.cacheDirectory + 'CheckerQ_Report_MultiSheet.xlsx';
 
     try {
-        await FileSystem.writeAsStringAsync(uri, wbout, { encoding: (FileSystem as any).EncodingType.Base64 });
+        await FileSystem.writeAsStringAsync(uri, wbout, { encoding: FileSystem.EncodingType.Base64 });
         await Sharing.shareAsync(uri, {
             mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             dialogTitle: 'Share Assessment Report',

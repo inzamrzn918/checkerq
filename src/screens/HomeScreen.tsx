@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, D
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { Plus, FileText, Settings as SettingsIcon, ClipboardCheck, ChevronRight, BookOpen, HelpCircle } from 'lucide-react-native';
+import { Plus, FileText, Settings as SettingsIcon, ClipboardCheck, ChevronRight, BookOpen, HelpCircle, Users } from 'lucide-react-native';
 import { StorageService, Assessment, Evaluation } from '../services/storage';
 import { settingsService } from '../services/settings';
 import ApiKeyPrompt from '../components/ApiKeyPrompt';
@@ -189,16 +189,57 @@ export default function HomeScreen({ navigation }: any) {
                     </TouchableOpacity>
                 </View>
 
-                {/* Quick Stats Row */}
-                <View style={styles.statsRow}>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statValue}>{assessments.length}</Text>
-                        <Text style={styles.statLabel}>Total Exams</Text>
+                {/* Quick Actions */}
+                <View style={styles.quickActions}>
+                    <TouchableOpacity
+                        style={styles.quickActionBtn}
+                        onPress={() => navigation.navigate('Analytics')}
+                    >
+                        <ClipboardCheck color={theme.colors.primary} size={20} />
+                        <Text style={styles.quickActionText}>Analytics</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.quickActionBtn}>
+                        <BookOpen color={theme.colors.primary} size={20} />
+                        <Text style={styles.quickActionText}>Export</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.quickActionBtn}
+                        onPress={() => navigation.navigate('Settings')}
+                    >
+                        <SettingsIcon color={theme.colors.primary} size={20} />
+                        <Text style={styles.quickActionText}>Settings</Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Enhanced Stats */}
+                <View style={styles.statsContainer}>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIconCircle, { backgroundColor: '#dbeafe' }]}>
+                            <FileText color="#3b82f6" size={24} />
+                        </View>
+                        <Text style={styles.statCardValue}>{assessments.length}</Text>
+                        <Text style={styles.statCardLabel}>Total Exams</Text>
                     </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                        <Text style={styles.statValue}>{evaluations.length}</Text>
-                        <Text style={styles.statLabel}>Papers Checked</Text>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIconCircle, { backgroundColor: '#dcfce7' }]}>
+                            <ClipboardCheck color="#10b981" size={24} />
+                        </View>
+                        <Text style={styles.statCardValue}>{evaluations.length}</Text>
+                        <Text style={styles.statCardLabel}>Papers Checked</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIconCircle, { backgroundColor: '#fef3c7' }]}>
+                            <Users color="#f59e0b" size={24} />
+                        </View>
+                        <Text style={styles.statCardValue}>{new Set(evaluations.map(e => e.studentName)).size}</Text>
+                        <Text style={styles.statCardLabel}>Students</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIconCircle, { backgroundColor: '#ddd6fe' }]}>
+                            <BookOpen color="#8b5cf6" size={24} />
+                        </View>
+                        <Text style={styles.statCardValue}>{Object.keys(subjects).length}</Text>
+                        <Text style={styles.statCardLabel}>Subjects</Text>
                     </View>
                 </View>
 
@@ -381,6 +422,64 @@ const styles = StyleSheet.create({
         borderRadius: 50,
         backgroundColor: 'rgba(255,255,255,0.15)',
         zIndex: 1,
+    },
+    quickActions: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: theme.spacing.lg,
+        gap: 12,
+    },
+    quickActionBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: theme.colors.surface,
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        gap: 8,
+    },
+    quickActionText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: theme.colors.text,
+    },
+    statsContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: theme.spacing.xl,
+    },
+    statCard: {
+        flex: 1,
+        minWidth: '45%',
+        backgroundColor: theme.colors.surface,
+        padding: 16,
+        borderRadius: 16,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    statIconCircle: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    statCardValue: {
+        fontSize: 28,
+        fontWeight: 'bold',
+        color: theme.colors.text,
+        marginBottom: 4,
+    },
+    statCardLabel: {
+        fontSize: 12,
+        color: theme.colors.textSecondary,
+        textAlign: 'center',
     },
     statsRow: {
         flexDirection: 'row',
