@@ -3,8 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, D
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { Plus, FileText, Settings as SettingsIcon, ClipboardCheck, ChevronRight, BookOpen } from 'lucide-react-native';
+import { Plus, FileText, Settings as SettingsIcon, ClipboardCheck, ChevronRight, BookOpen, HelpCircle } from 'lucide-react-native';
 import { StorageService, Assessment, Evaluation } from '../services/storage';
+import { settingsService } from '../services/settings';
+import ApiKeyPrompt from '../components/ApiKeyPrompt';
+import SearchBar from '../components/SearchBar';
+import OnboardingTutorial, { checkOnboardingStatus } from '../components/OnboardingTutorial';
 
 const { width } = Dimensions.get('window');
 
@@ -12,10 +16,25 @@ export default function HomeScreen({ navigation }: any) {
     const [assessments, setAssessments] = useState<Assessment[]>([]);
     const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
     const [refreshing, setRefreshing] = useState(false);
+    const [showApiKeyPrompt, setShowApiKeyPrompt] = useState(false);
+    const [showOnboarding, setShowOnboarding] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const [selectedClass, setSelectedClass] = useState<string | null>(null);
 
     const loadData = useCallback(async () => {
+        // Check if API keys are configured
+        const hasKeys = await settingsService.hasValidKeys();
+        setShowApiKeyPrompt(!hasKeys);
+
+        // Check if onboarding has been shown
+        if (hasKeys) {
+            const onboardingCompleted = await checkOnboardingStatus();
+            if (!onboardingCompleted) {
+                setShowOnboarding(true);
+            }
+        }
+
         const [aData, eData] = await Promise.all([
             StorageService.getAssessments(),
             StorageService.getEvaluations()
@@ -55,9 +74,18 @@ export default function HomeScreen({ navigation }: any) {
         ? assessments.filter(a => a.classRoom === selectedClass)
         : assessments;
 
+    // Filter by search query
+    const searchFilteredAssessments = searchQuery.trim()
+        ? filteredAssessments.filter(a =>
+            a.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            a.teacherName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            a.classRoom?.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+        : filteredAssessments;
+
     // Group assessments by Subject (Filtered)
     const subjects: Record<string, Assessment[]> = {};
-    filteredAssessments.forEach(a => {
+    searchFilteredAssessments.forEach(a => {
         if (!a.subject) return;
         if (!subjects[a.subject]) subjects[a.subject] = [];
         subjects[a.subject].push(a);
@@ -73,12 +101,20 @@ export default function HomeScreen({ navigation }: any) {
                     <Text style={styles.greeting}>{getGreeting()}, Teacher</Text>
                     <Text style={styles.subGreeting}>Ready to assess some papers today?</Text>
                 </View>
-                <TouchableOpacity
-                    style={styles.settingsButton}
-                    onPress={() => navigation.navigate('Settings')}
-                >
-                    <SettingsIcon color={theme.colors.text} size={24} />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                        style={styles.settingsButton}
+                        onPress={() => setShowOnboarding(true)}
+                    >
+                        <HelpCircle color={theme.colors.text} size={24} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.settingsButton}
+                        onPress={() => navigation.navigate('Settings')}
+                    >
+                        <SettingsIcon color={theme.colors.text} size={24} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Class Tabs */}
@@ -102,6 +138,15 @@ export default function HomeScreen({ navigation }: any) {
                 </View>
             )}
 
+            {/* Search Bar */}
+            <View style={styles.searchContainer}>
+                <SearchBar
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Search by subject, teacher, or class..."
+                />
+            </View>
+
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -115,15 +160,15 @@ export default function HomeScreen({ navigation }: any) {
                         activeOpacity={0.9}
                     >
                         <View style={styles.mainCardContent}>
-                            <View style={styles.mainCardIconCircle}>
+                            <View style={[styles.mainCardIconCircle, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
                                 <Plus color={theme.colors.primary} size={32} strokeWidth={3} />
                             </View>
                             <View>
                                 <Text style={styles.mainCardTitle}>Create Exam</Text>
-                                <Text style={styles.mainCardSub}>Upload paper & set key</Text>
+                                <Text style={styles.mainCardSub}>Set up a new assessment</Text>
                             </View>
                         </View>
-                        <View style={styles.mainCardDecoration} />
+                        <View style={[styles.mainCardDecoration, { backgroundColor: 'rgba(255,255,255,0.1)' }]} />
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -228,6 +273,19 @@ export default function HomeScreen({ navigation }: any) {
                     </View>
                 )}
             </ScrollView>
+
+            <ApiKeyPrompt
+                visible={showApiKeyPrompt}
+                onKeysConfigured={() => {
+                    setShowApiKeyPrompt(false);
+                    loadData();
+                }}
+            />
+
+            <OnboardingTutorial
+                visible={showOnboarding}
+                onComplete={() => setShowOnboarding(false)}
+            />
         </SafeAreaView>
     );
 }
@@ -261,6 +319,10 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         borderWidth: 1,
         borderColor: theme.colors.border,
+    },
+    searchContainer: {
+        paddingHorizontal: theme.spacing.xl,
+        paddingVertical: theme.spacing.md,
     },
     scrollContent: {
         padding: theme.spacing.lg,

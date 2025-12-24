@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as FileSystem from 'expo-file-system/legacy';
 
 // In Expo, environment variables prefixed with EXPO_PUBLIC_ are accessible via process.env
-const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
+const DEFAULT_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
 
 const genAI = (key: string) => new GoogleGenerativeAI(key);
 
@@ -30,20 +30,25 @@ export interface PaperEvaluation {
     overallFeedback: string;
 }
 
-let userApiKey = API_KEY;
+let userApiKey = DEFAULT_API_KEY;
 
 export const GeminiService = {
     setApiKey: (key: string) => {
         userApiKey = key;
     },
 
+    getApiKey: (): string => {
+        return userApiKey || DEFAULT_API_KEY;
+    },
+
     async extractQuestions(uris: string | string[]): Promise<Question[]> {
-        if (!userApiKey) throw new Error("API Key not found. Please set it in Settings.");
+        const apiKey = this.getApiKey();
+        if (!apiKey) throw new Error("API Key not found. Please set it in Settings.");
 
         const uriList = Array.isArray(uris) ? uris : [uris];
 
         try {
-            const model = genAI(userApiKey).getGenerativeModel({ model: "gemini-flash-latest" });
+            const model = genAI(apiKey).getGenerativeModel({ model: "gemini-flash-latest" });
 
             const parts = await Promise.all(uriList.map(async (uri) => {
                 const base64Data = await FileSystem.readAsStringAsync(uri, {

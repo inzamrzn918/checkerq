@@ -7,6 +7,7 @@ import { Camera as CameraIcon, ChevronLeft, Scan, ClipboardCheck, ArrowRight, Ch
 import { GeminiService, PaperEvaluation } from '../services/gemini';
 import { MistralService } from '../services/mistral';
 import { StorageService, Assessment } from '../services/storage';
+import { settingsService } from '../services/settings';
 import { useFocusEffect } from '@react-navigation/native';
 
 type Step = 'SELECT' | 'COVER_SCAN' | 'COVER_VERIFY' | 'ANSWER_SCAN' | 'ANSWER_VERIFY' | 'SUMMARY';
@@ -27,6 +28,18 @@ export default function EvaluationScreen({ route, navigation }: any) {
     useFocusEffect(
         useCallback(() => {
             const fetchAssessments = async () => {
+                // Load API keys and set them
+                const keys = await settingsService.getApiKeys();
+                if (keys.gemini) {
+                    GeminiService.setApiKey(keys.gemini);
+                }
+                if (keys.mistral) {
+                    MistralService.setApiKey(keys.mistral);
+                } else if (keys.gemini) {
+                    // Use Gemini as fallback for Mistral
+                    MistralService.setApiKey(keys.gemini);
+                }
+
                 const data = await StorageService.getAssessments();
                 setAssessments(data);
                 if (route.params?.assessment) {

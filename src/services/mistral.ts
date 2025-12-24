@@ -1,7 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-const API_KEY = process.env.MISTRAL_API_KEY || process.env.EXPO_PUBLIC_MISTRAL_API_KEY || "";
+const DEFAULT_API_KEY = process.env.MISTRAL_API_KEY || process.env.EXPO_PUBLIC_MISTRAL_API_KEY || "";
 const MISTRAL_OCR_ENDPOINT = "https://api.mistral.ai/v1/ocr";
+
+let userApiKey = DEFAULT_API_KEY;
 
 export interface MistralOCRResult {
     pages: {
@@ -12,8 +14,16 @@ export interface MistralOCRResult {
 }
 
 export const MistralService = {
+    setApiKey: (key: string) => {
+        userApiKey = key;
+    },
+
+    getApiKey: (): string => {
+        return userApiKey || DEFAULT_API_KEY;
+    },
     async extractText(uri: string): Promise<string> {
-        if (!API_KEY) {
+        const apiKey = this.getApiKey();
+        if (!apiKey) {
             console.error("Mistral API Key is missing. Please check MISTRAL_API_KEY or EXPO_PUBLIC_MISTRAL_API_KEY in .env");
             throw new Error("Mistral API Key not configured.");
         }
@@ -37,7 +47,7 @@ export const MistralService = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${API_KEY}`
+                    'Authorization': `Bearer ${apiKey}`
                 },
                 body: JSON.stringify(payload)
             });
