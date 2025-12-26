@@ -1,45 +1,72 @@
-# CheckerQ - AI Exam Evaluator
+# CheckerQ Project
 
-An Android app built with Expo that automates the evaluation of handwritten exam sheets.
+An AI-powered exam evaluation system with admin portal backend.
 
-## Features
-- **Pipeline Setup**: Upload or take a photo of a question paper. The system uses Gemini AI to extract questions, marks, and instructions.
-- **Marking Scheme Review**: Verify and edit the extracted questions and assigned marks.
-- **Handwritten Evaluation**: Scan student answer sheets. Gemini AI reads the handwriting, compares it against the question paper, and provides fair grading with detailed feedback.
-- **Premium UI**: Dark mode, smooth transitions, and intuitive dashboard.
+## Project Structure
 
-## Tech Stack
-- **Frontend**: React Native (Expo)
-- **Navigation**: React Navigation (Stack)
-- **AI Engine**: Google Gemini 1.5 Flash
-- **Icons**: Lucide React Native
-
-## Getting Started
-
-1. **Install Dependencies**:
-   ```bash
-   npm install
-   ```
-
-2. **Configure API Key**:
-   - Open the app.
-   - Go to **Settings** (top right icon).
-   - Enter your **Google Gemini API Key**.
-   - Save.
-
-3. **Create a Pipeline**:
-   - Tap **New Exam Pipeline**.
-   - Upload/Snap a question paper image.
-   - Review the extracted JSON-like structure of questions.
-   - Confirm to save.
-
-4. **Evaluate Sheets**:
-   - Tap **Start Evaluation**.
-   - Snap a photo of the student's handwritten answer sheet.
-   - Wait for AI to process and grade.
-   - View results and feedback.
-
-## Running the App
-```bash
-npx expo start --android
 ```
+checkerq/
+├── src/                    # Mobile app source (React Native + Expo)
+├── backend/                # Backend API (FastAPI + PostgreSQL)
+└── admin-portal/           # Admin web portal (React + Vite)
+```
+
+## Components
+
+### Mobile App
+- React Native with Expo
+- AI-powered exam evaluation
+- SQLite local storage
+- Camera integration
+
+### Backend API
+- FastAPI with PostgreSQL
+- JWT authentication + Google OAuth
+- License management system
+- User management
+- Analytics tracking
+
+### Admin Portal
+- React + TypeScript + Vite
+- Dashboard with charts
+- User management
+- License generation
+- Real-time analytics
+
+## Quick Start
+
+### Mobile App
+```bash
+npm install
+npm start
+```
+
+**For Android setup:** See [ANDROID_SETUP.md](./ANDROID_SETUP.md) for detailed instructions on configuring the app to connect to your backend.
+
+### Backend
+```bash
+cd backend
+docker-compose up -d
+# OR
+setup.bat
+# For network access (required for Android):
+uvicorn app.main:app --host 0.0.0.0 --reload
+```
+
+### Admin Portal
+```bash
+cd admin-portal
+npm install
+npm run dev
+```
+
+## Documentation
+
+- **Android Setup:** [ANDROID_SETUP.md](./ANDROID_SETUP.md)
+- Mobile App: [README.md](./README.md)
+- Backend: [backend/README.md](./backend/README.md)
+- Admin Portal: [admin-portal/README.md](./admin-portal/README.md)
+
+## License
+
+Proprietary

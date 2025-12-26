@@ -3,16 +3,75 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Ale
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { theme } from '../theme/theme';
 import { Upload, ChevronLeft, FileImage, FileText } from 'lucide-react-native';
 import { GeminiService } from '../services/gemini';
+import { useConfig } from '../context/ConfigContext';
 
 export default function SetupAssessmentScreen({ navigation }: any) {
+    const { config } = useConfig();
     const [images, setImages] = useState<string[]>([]);
     const [teacherName, setTeacherName] = useState('');
     const [subject, setSubject] = useState('');
     const [classRoom, setClassRoom] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // Get upload limits from config
+    const uploadLimits = config?.upload_limits;
+    const maxFileSize = uploadLimits?.max_file_size ?? 10485760; // 10MB default
+    const allowedTypes = uploadLimits?.allowed_file_types ?? ['pdf', 'jpg', 'jpeg', 'png'];
+    const maxFiles = uploadLimits?.max_files_per_assessment ?? 10;
+
+    // Helper function to format bytes
+    const formatBytes = (bytes: number) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    };
+
+    // Helper function to get file extension
+    const getFileExtension = (uri: string): string => {
+        return uri.split('.').pop()?.toLowerCase() ?? '';
+    };
+
+    // Helper function to validate file
+    const validateFile = async (uri: string): Promise<boolean> => {
+        try {
+            // Check file count
+            if (images.length >= maxFiles) {
+                Alert.alert('Too Many Files', `Maximum ${maxFiles} files allowed per assessment`);
+                return false;
+            }
+
+            // Check file type
+            const ext = getFileExtension(uri);
+            if (!allowedTypes.includes(ext)) {
+                Alert.alert(
+                    'Invalid File Type',
+                    `Only ${allowedTypes.join(', ').toUpperCase()} files are allowed`
+                );
+                return false;
+            }
+
+            // Check file size
+            const fileInfo = await FileSystem.getInfoAsync(uri);
+            if (fileInfo.exists && 'size' in fileInfo && fileInfo.size > maxFileSize) {
+                Alert.alert(
+                    'File Too Large',
+                    `Maximum file size is ${formatBytes(maxFileSize)}. This file is ${formatBytes(fileInfo.size)}`
+                );
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('File validation error:', error);
+            return true; // Allow on error to not block user
+        }
+    };
 
     const isFormFilled = teacherName.trim() !== '' || subject.trim() !== '' || classRoom.trim() !== '' || images.length > 0;
 
@@ -53,7 +112,17 @@ export default function SetupAssessmentScreen({ navigation }: any) {
         });
 
         if (!result.canceled) {
-            setImages(prev => [...prev, ...result.assets.map(a => a.uri)]);
+            // Validate each selected image
+            const validatedUris: string[] = [];
+            for (const asset of result.assets) {
+                const isValid = await validateFile(asset.uri);
+                if (isValid) {
+                    validatedUris.push(asset.uri);
+                }
+            }
+            if (validatedUris.length > 0) {
+                setImages(prev => [...prev, ...validatedUris]);
+            }
         }
     };
 
@@ -69,7 +138,10 @@ export default function SetupAssessmentScreen({ navigation }: any) {
         });
 
         if (!result.canceled) {
-            setImages(prev => [...prev, result.assets[0].uri]);
+            const isValid = await validateFile(result.assets[0].uri);
+            if (isValid) {
+                setImages(prev => [...prev, result.assets[0].uri]);
+            }
         }
     };
 
@@ -80,9 +152,12 @@ export default function SetupAssessmentScreen({ navigation }: any) {
         });
 
         if (!result.canceled) {
-            // For now, we'll treat PDF as a single entry in images array
-            // GeminiService will need to handle it
-            setImages(prev => [...prev, result.assets[0].uri]);
+            const isValid = await validateFile(result.assets[0].uri);
+            if (isValid) {
+                // For now, we'll treat PDF as a single entry in images array
+                // GeminiService will need to handle it
+                setImages(prev => [...prev, result.assets[0].uri]);
+            }
         }
     };
 

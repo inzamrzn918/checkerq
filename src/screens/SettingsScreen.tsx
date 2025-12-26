@@ -3,10 +3,12 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Linking, Ac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { ChevronLeft, Save, Key, Trash2, ExternalLink, Download, Upload, Cloud, Database } from 'lucide-react-native';
+import { ChevronLeft, Save, Key, Trash2, ExternalLink, Download, Upload, Cloud, Database, LogOut, Award } from 'lucide-react-native';
 import { settingsService } from '../services/settings';
 import { BackupService } from '../services/backup';
 import { showError, showSuccess, showConfirm } from '../utils/errorHandler';
+import authService from '../services/authService';
+import licenseService from '../services/licenseService';
 
 export default function SettingsScreen({ navigation }: any) {
     const [geminiKey, setGeminiKey] = useState('');
@@ -15,6 +17,8 @@ export default function SettingsScreen({ navigation }: any) {
     const [saving, setSaving] = useState(false);
     const [backupPrefs, setBackupPrefs] = useState<any>(null);
     const [backupLoading, setBackupLoading] = useState(false);
+    const [currentUser, setCurrentUser] = useState<any>(null);
+    const [currentLicense, setCurrentLicense] = useState<any>(null);
 
     // Removed the initial useEffect that called loadKeys() as loadData will handle everything on focus.
 
@@ -29,14 +33,37 @@ export default function SettingsScreen({ navigation }: any) {
         try {
             const keys = await settingsService.getApiKeys();
             const prefs = await settingsService.getBackupPreferences();
+            const user = await authService.getCurrentUser();
+            const license = await licenseService.getCurrentLicense();
+
             setGeminiKey(keys.gemini || '');
             setMistralKey(keys.mistral || '');
             setBackupPrefs(prefs);
+            setCurrentUser(user);
+            setCurrentLicense(license);
         } catch (error) {
             Alert.alert('Error', 'Failed to load settings.');
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleLogout = async () => {
+        Alert.alert(
+            'Logout',
+            'Are you sure you want to logout?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Logout',
+                    style: 'destructive',
+                    onPress: async () => {
+                        await authService.signOut();
+                        navigation.replace('Login');
+                    }
+                }
+            ]
+        );
     };
 
     // Removed the original loadKeys function as its logic is now part of loadData.
@@ -87,7 +114,43 @@ export default function SettingsScreen({ navigation }: any) {
                 <View style={{ width: 28 }} />
             </View>
 
-            <View style={styles.content}>
+            <ScrollView style={styles.content}>
+                {/* Account Section */}
+                {currentUser && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Account</Text>
+                        <View style={styles.accountCard}>
+                            <View style={styles.accountInfo}>
+                                <Text style={styles.accountName}>{currentUser.name}</Text>
+                                <Text style={styles.accountEmail}>{currentUser.email}</Text>
+                            </View>
+                        </View>
+
+                        {/* License Status */}
+                        <TouchableOpacity
+                            style={styles.actionButton}
+                            onPress={() => navigation.navigate('LicenseActivation')}
+                        >
+                            <Award color={theme.colors.primary} size={20} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.actionButtonText}>License</Text>
+                                <Text style={styles.actionButtonSubtext}>
+                                    {currentLicense ? `${currentLicense.type.toUpperCase()} - Active` : 'Activate License'}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* Logout Button */}
+                        <TouchableOpacity
+                            style={[styles.actionButton, styles.logoutButton]}
+                            onPress={handleLogout}
+                        >
+                            <LogOut color={theme.colors.error} size={20} />
+                            <Text style={[styles.actionButtonText, styles.logoutText]}>Logout</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>AI API Keys</Text>
                     <Text style={styles.subText}>Your API keys are stored securely and only used to communicate with AI services.</Text>
@@ -144,7 +207,7 @@ export default function SettingsScreen({ navigation }: any) {
                     <Save color="#fff" size={20} />
                     <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Settings'}</Text>
                 </TouchableOpacity>
-            </View>
+            </ScrollView>
         </SafeAreaView>
     );
 }
@@ -246,5 +309,52 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 18,
         fontWeight: 'bold',
+    },
+    accountCard: {
+        backgroundColor: theme.colors.surface,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        padding: 16,
+        marginBottom: 16,
+    },
+    accountInfo: {
+        gap: 4,
+    },
+    accountName: {
+        color: theme.colors.text,
+        fontSize: 18,
+        fontWeight: '600',
+    },
+    accountEmail: {
+        color: theme.colors.textSecondary,
+        fontSize: 14,
+    },
+    actionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: theme.colors.surface,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        padding: 16,
+        marginBottom: 12,
+        gap: 12,
+    },
+    actionButtonText: {
+        color: theme.colors.text,
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    actionButtonSubtext: {
+        color: theme.colors.textSecondary,
+        fontSize: 12,
+        marginTop: 2,
+    },
+    logoutButton: {
+        borderColor: theme.colors.error,
+    },
+    logoutText: {
+        color: theme.colors.error,
     },
 });

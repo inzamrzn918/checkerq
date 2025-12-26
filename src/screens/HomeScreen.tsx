@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Dimensions, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -9,6 +9,7 @@ import { settingsService } from '../services/settings';
 import ApiKeyPrompt from '../components/ApiKeyPrompt';
 import SearchBar from '../components/SearchBar';
 import OnboardingTutorial, { checkOnboardingStatus } from '../components/OnboardingTutorial';
+import { useConfig } from '../context/ConfigContext';
 
 const { width } = Dimensions.get('window');
 

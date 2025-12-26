@@ -1,6 +1,7 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { NavigationContainer } from '@react-navigation/native';
+import LoginScreen from '../screens/LoginScreen';
 import HomeScreen from '../screens/HomeScreen';
 import SetupAssessmentScreen from '../screens/SetupAssessmentScreen';
 import ReviewQuestionsScreen from '../screens/ReviewQuestionsScreen';
@@ -10,6 +11,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import SubjectDetailsScreen from '../screens/SubjectDetailsScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
+import LicenseActivationScreen from '../screens/LicenseActivationScreen';
 
 const Stack = createStackNavigator();
 
@@ -17,12 +19,13 @@ export default function AppStack() {
     return (
         <NavigationContainer>
             <Stack.Navigator
-                initialRouteName="Home"
+                initialRouteName="Login"
                 screenOptions={{
                     headerShown: false,
                     cardStyle: { backgroundColor: '#0f172a' }
                 }}
             >
+                <Stack.Screen name="Login" component={LoginScreen} />
                 <Stack.Screen name="Home" component={HomeScreen} />
                 <Stack.Screen name="SetupAssessment" component={SetupAssessmentScreen} />
                 <Stack.Screen name="ReviewQuestions" component={ReviewQuestionsScreen} />
@@ -32,6 +35,7 @@ export default function AppStack() {
                 <Stack.Screen name="Analytics" component={AnalyticsScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />
                 <Stack.Screen name="History" component={HistoryScreen} />
+                <Stack.Screen name="LicenseActivation" component={LicenseActivationScreen} />
             </Stack.Navigator>
         </NavigationContainer>
     );
