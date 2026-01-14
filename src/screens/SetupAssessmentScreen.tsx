@@ -57,11 +57,11 @@ export default function SetupAssessmentScreen({ navigation }: any) {
             }
 
             // Check file size
-            const fileInfo = await FileSystem.getInfoAsync(uri);
-            if (fileInfo.exists && 'size' in fileInfo && fileInfo.size > maxFileSize) {
+            const file = new FileSystem.File(uri);
+            if (file.exists && file.size > maxFileSize) {
                 Alert.alert(
                     'File Too Large',
-                    `Maximum file size is ${formatBytes(maxFileSize)}. This file is ${formatBytes(fileInfo.size)}`
+                    `Maximum file size is ${formatBytes(maxFileSize)}. This file is ${formatBytes(file.size)}`
                 );
                 return false;
             }

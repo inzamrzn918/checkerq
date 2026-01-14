@@ -35,9 +35,6 @@ export default function EvaluationScreen({ route, navigation }: any) {
                 }
                 if (keys.mistral) {
                     MistralService.setApiKey(keys.mistral);
-                } else if (keys.gemini) {
-                    // Use Gemini as fallback for Mistral
-                    MistralService.setApiKey(keys.gemini);
                 }
 
                 const data = await StorageService.getAssessments();
@@ -103,8 +100,16 @@ export default function EvaluationScreen({ route, navigation }: any) {
 
         try {
             // 1. OCR
-            setStatusMsg('Reading handwriting (Mistral)...');
-            const text = await MistralService.extractText(uri);
+            const mistralKey = MistralService.getApiKey();
+            let text = "";
+
+            if (mistralKey) {
+                setStatusMsg('Reading handwriting (Mistral)...');
+                text = await MistralService.extractText(uri);
+            } else {
+                setStatusMsg('Reading handwriting (Gemini)...');
+                text = await GeminiService.extractText(uri);
+            }
 
             // 2. Evaluate
             setStatusMsg('Grading (Gemini)...');

@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 
 // In Expo, environment variables prefixed with EXPO_PUBLIC_ are accessible via process.env
 const DEFAULT_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
@@ -32,6 +32,21 @@ export interface PaperEvaluation {
 
 let userApiKey = DEFAULT_API_KEY;
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, initialDelay = 1000): Promise<T> {
+    try {
+        return await fn();
+    } catch (error: any) {
+        if (retries > 0 && (error.message?.includes('503') || error.message?.includes('overloaded') || error.status === 503)) {
+            console.warn(`Model overloaded, retrying in ${initialDelay}ms... (${retries} retries left)`);
+            await delay(initialDelay);
+            return withRetry(fn, retries - 1, initialDelay * 2);
+        }
+        throw error;
+    }
+}
+
 export const GeminiService = {
     setApiKey: (key: string) => {
         userApiKey = key;
@@ -47,13 +62,11 @@ export const GeminiService = {
 
         const uriList = Array.isArray(uris) ? uris : [uris];
 
-        try {
+        return withRetry(async () => {
             const model = genAI(apiKey).getGenerativeModel({ model: "gemini-flash-latest" });
 
             const parts = await Promise.all(uriList.map(async (uri) => {
-                const base64Data = await FileSystem.readAsStringAsync(uri, {
-                    encoding: 'base64',
-                });
+                const base64Data = await new FileSystem.File(uri).base64();
                 const isPdf = uri.toLowerCase().endsWith('.pdf');
                 return {
                     inlineData: {
@@ -92,21 +105,17 @@ export const GeminiService = {
                 return JSON.parse(jsonMatch[0]);
             }
             throw new Error("Failed to parse JSON from Gemini response");
-        } catch (error) {
-            console.error("Extraction error:", error);
-            throw error;
-        }
+        });
     },
 
     async evaluatePaper(answerSheetUri: string, questions: Question[]): Promise<PaperEvaluation> {
-        if (!userApiKey) throw new Error("API Key not found. Please set it in Settings.");
+        const apiKey = this.getApiKey();
+        if (!apiKey) throw new Error("API Key not found. Please set it in Settings.");
 
-        try {
-            const model = genAI(userApiKey).getGenerativeModel({ model: "gemini-flash-latest" });
+        return withRetry(async () => {
+            const model = genAI(apiKey).getGenerativeModel({ model: "gemini-flash-latest" });
 
-            const base64Image = await FileSystem.readAsStringAsync(answerSheetUri, {
-                encoding: 'base64',
-            });
+            const base64Image = await new FileSystem.File(answerSheetUri).base64();
 
             const prompt = `
         You are an expert teacher. Evaluate this handwritten answer sheet based on the following questions:
@@ -151,17 +160,15 @@ export const GeminiService = {
                 return JSON.parse(jsonMatch[0]);
             }
             throw new Error("Failed to parse evaluation JSON");
-        } catch (error) {
-            console.error("Evaluation error:", error);
-            throw error;
-        }
+        });
     },
 
     async evaluatePaperText(studentText: string, questions: Question[]): Promise<PaperEvaluation> {
-        if (!userApiKey) throw new Error("API Key not found. Please set it in Settings.");
+        const apiKey = this.getApiKey();
+        if (!apiKey) throw new Error("API Key not found. Please set it in Settings.");
 
-        try {
-            const model = genAI(userApiKey).getGenerativeModel({ model: "gemini-flash-latest" });
+        return withRetry(async () => {
+            const model = genAI(apiKey).getGenerativeModel({ model: "gemini-flash-latest" });
 
             const prompt = `
         You are an expert teacher. Evaluate the following student answers (extracted via OCR) based on the provided questions.
@@ -203,18 +210,16 @@ export const GeminiService = {
                 return JSON.parse(jsonMatch[0]);
             }
             throw new Error("Failed to parse evaluation JSON from text");
-        } catch (error) {
-            console.error("Text Evaluation error:", error);
-            throw error;
-        }
+        });
     },
 
     async extractStudentInfo(uri: string): Promise<{ name?: string; rollNo?: string; class?: string }> {
-        if (!userApiKey) throw new Error("API Key not found.");
+        const apiKey = this.getApiKey();
+        if (!apiKey) throw new Error("API Key not found.");
 
-        try {
-            const model = genAI(userApiKey).getGenerativeModel({ model: "gemini-flash-latest" });
-            const base64Data = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+        return withRetry(async () => {
+            const model = genAI(apiKey).getGenerativeModel({ model: "gemini-flash-latest" });
+            const base64Data = await new FileSystem.File(uri).base64();
 
             const prompt = `
                 Analyze this exam paper cover page. Extract the following student details:
@@ -241,9 +246,25 @@ export const GeminiService = {
             const jsonMatch = text.match(/\{.*\}/s);
             if (jsonMatch) return JSON.parse(jsonMatch[0]);
             return {};
-        } catch (error) {
-            console.error("Student Info Extraction Error:", error);
-            return {};
-        }
+        });
+    },
+
+    async extractText(uri: string): Promise<string> {
+        const apiKey = this.getApiKey();
+        if (!apiKey) throw new Error("API Key not found.");
+
+        return withRetry(async () => {
+            const model = genAI(apiKey).getGenerativeModel({ model: "gemini-flash-latest" });
+            const base64Data = await new FileSystem.File(uri).base64();
+
+            const prompt = "Transcribe the handwritten or printed text from this image exactly as it is. Use markdown format if there are tables or lists.";
+
+            const result = await model.generateContent([
+                prompt,
+                { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+            ]);
+            const response = await result.response;
+            return response.text();
+        });
     }
 };
