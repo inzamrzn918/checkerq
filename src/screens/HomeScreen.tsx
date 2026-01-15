@@ -1,27 +1,36 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Dimensions, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Dimensions, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { Plus, FileText, Settings as SettingsIcon, ClipboardCheck, ChevronRight, BookOpen, HelpCircle, Users } from 'lucide-react-native';
+import { Plus, FileText, Settings as SettingsIcon, ClipboardCheck, ChevronRight, BookOpen, HelpCircle, Users, Pause, Play, Clock, Zap, Home, History, BarChart2, Scan, AlertCircle, Activity, CheckCircle, Trash2 } from 'lucide-react-native';
 import { StorageService, Assessment, Evaluation } from '../services/storage';
 import { settingsService } from '../services/settings';
 import ApiKeyPrompt from '../components/ApiKeyPrompt';
 import SearchBar from '../components/SearchBar';
 import OnboardingTutorial, { checkOnboardingStatus } from '../components/OnboardingTutorial';
 import { useConfig } from '../context/ConfigContext';
+import { evaluationQueue } from '../services/queue';
 
 const { width } = Dimensions.get('window');
 
 export default function HomeScreen({ navigation }: any) {
     const [assessments, setAssessments] = useState<Assessment[]>([]);
     const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+    const [activeJobs, setActiveJobs] = useState<Evaluation[]>([]);
     const [refreshing, setRefreshing] = useState(false);
     const [showApiKeyPrompt, setShowApiKeyPrompt] = useState(false);
     const [showOnboarding, setShowOnboarding] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
     const [selectedClass, setSelectedClass] = useState<string | null>(null);
+
+    useEffect(() => {
+        const unsubscribe = evaluationQueue.addListener((jobs) => {
+            setActiveJobs(jobs);
+        });
+        return unsubscribe;
+    }, []);
 
     const loadData = useCallback(async () => {
         // Check if API keys are configured
@@ -63,6 +72,51 @@ export default function HomeScreen({ navigation }: any) {
         setRefreshing(false);
     };
 
+    const handleDelete = async (id: string, name?: string) => {
+        Alert.alert(
+            'Delete Result?',
+            `Are you sure you want to delete the result for ${name || 'this student'}?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            // Optimistic update
+                            setEvaluations(prev => prev.filter(e => e.id !== id));
+                            await StorageService.deleteEvaluation(id);
+                            loadData();
+                        } catch (error) {
+                            console.error('Delete failed:', error);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleCancelJob = async (id: string) => {
+        Alert.alert(
+            'Abort Job?',
+            'Are you sure you want to cancel this processing job?',
+            [
+                { text: 'Keep It', style: 'cancel' },
+                {
+                    text: 'Abort',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await evaluationQueue.cancelJob(id);
+                        } catch (error) {
+                            console.error('Cancel failed:', error);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const getGreeting = () => {
         const hour = new Date().getHours();
         if (hour < 12) return 'Good Morning';
@@ -84,12 +138,14 @@ export default function HomeScreen({ navigation }: any) {
         )
         : filteredAssessments;
 
-    // Group assessments by Subject (Filtered)
-    const subjects: Record<string, Assessment[]> = {};
+    // Group assessments by Exam Type -> Subject
+    const examGroups: Record<string, Record<string, Assessment[]>> = {};
     searchFilteredAssessments.forEach(a => {
-        if (!a.subject) return;
-        if (!subjects[a.subject]) subjects[a.subject] = [];
-        subjects[a.subject].push(a);
+        const et = a.examType || 'General';
+        const sub = a.subject || 'General';
+        if (!examGroups[et]) examGroups[et] = {};
+        if (!examGroups[et][sub]) examGroups[et][sub] = [];
+        examGroups[et][sub].push(a);
     });
 
     const uniqueClasses = Array.from(new Set(assessments.map(a => a.classRoom).filter(Boolean)));
@@ -98,54 +154,30 @@ export default function HomeScreen({ navigation }: any) {
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor={theme.colors.background} />
             <View style={styles.header}>
-                <View>
-                    <Text style={styles.greeting}>{getGreeting()}, Teacher</Text>
-                    <Text style={styles.subGreeting}>Ready to assess some papers today?</Text>
+                <View style={styles.headerLeft}>
+                    <Text style={styles.greeting}>Good Morning,</Text>
+                    <Text style={styles.userName}>Teacher</Text>
                 </View>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableOpacity
-                        style={styles.settingsButton}
-                        onPress={() => setShowOnboarding(true)}
-                    >
-                        <HelpCircle color={theme.colors.text} size={24} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.settingsButton}
-                        onPress={() => navigation.navigate('Settings')}
-                    >
-                        <SettingsIcon color={theme.colors.text} size={24} />
-                    </TouchableOpacity>
+                <View style={styles.headerRight}>
+                    <View style={styles.summaryCard}>
+                        <View style={styles.summaryIconBox}>
+                            <Clock size={16} color={theme.colors.text} />
+                        </View>
+                        <View style={styles.summaryText}>
+                            <Text style={styles.summaryVal}>{evaluations.filter(e => e.status === 'pending').length}</Text>
+                            <Text style={styles.summaryLabel}>Pending</Text>
+                        </View>
+                    </View>
+                    <View style={styles.summaryCard}>
+                        <View style={styles.summaryIconBox}>
+                            <Zap size={16} color={theme.colors.accent} />
+                        </View>
+                        <View style={styles.summaryText}>
+                            <Text style={styles.summaryVal}>{activeJobs.length}</Text>
+                            <Text style={styles.summaryLabel}>Active</Text>
+                        </View>
+                    </View>
                 </View>
-            </View>
-
-            {/* Class Tabs */}
-            {uniqueClasses.length > 0 && (
-                <View style={styles.tabContainer}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-                        {uniqueClasses.map(cls => (
-                            <TouchableOpacity
-                                key={cls}
-                                style={[styles.tabItem, selectedClass === cls && styles.tabItemActive]}
-                                onPress={() => {
-                                    setSelectedClass(cls);
-                                }}
-                            >
-                                <Text style={[styles.tabText, selectedClass === cls && styles.tabTextActive]}>
-                                    {cls}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
-            )}
-
-            {/* Search Bar */}
-            <View style={styles.searchContainer}>
-                <SearchBar
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    placeholder="Search by subject, teacher, or class..."
-                />
             </View>
 
             <ScrollView
@@ -153,168 +185,203 @@ export default function HomeScreen({ navigation }: any) {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 showsVerticalScrollIndicator={false}
             >
-                {/* Main Action Cards */}
-                <View style={styles.actionContainer}>
+                <View style={styles.heroActions}>
                     <TouchableOpacity
-                        style={[styles.mainCard, { backgroundColor: theme.colors.primary }]}
+                        style={styles.heroCard}
                         onPress={() => navigation.navigate('SetupAssessment')}
-                        activeOpacity={0.9}
                     >
-                        <View style={styles.mainCardContent}>
-                            <View style={[styles.mainCardIconCircle, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
-                                <Plus color={theme.colors.primary} size={32} strokeWidth={3} />
-                            </View>
-                            <View>
-                                <Text style={styles.mainCardTitle}>Create Exam</Text>
-                                <Text style={styles.mainCardSub}>Set up a new assessment</Text>
-                            </View>
+                        <View style={styles.glassEffect} />
+                        <View style={styles.heroCardIcon}>
+                            <Plus size={32} color={theme.colors.text} />
                         </View>
-                        <View style={[styles.mainCardDecoration, { backgroundColor: 'rgba(255,255,255,0.1)' }]} />
+                        <View>
+                            <Text style={styles.heroCardTitle}>New Assessment</Text>
+                            <Text style={styles.heroCardSub}>Create quiz or assignment</Text>
+                        </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={[styles.mainCard, { backgroundColor: theme.colors.secondary, marginTop: 16 }]}
+                        style={[styles.heroCard, { backgroundColor: theme.colors.primary + '30' }]}
                         onPress={() => navigation.navigate('Evaluation')}
-                        activeOpacity={0.9}
                     >
-                        <View style={styles.mainCardContent}>
-                            <View style={[styles.mainCardIconCircle, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
-                                <ClipboardCheck color={theme.colors.secondary} size={32} strokeWidth={3} />
-                            </View>
-                            <View>
-                                <Text style={styles.mainCardTitle}>Check Papers</Text>
-                                <Text style={styles.mainCardSub}>Scan & evaluate sheets</Text>
-                            </View>
+                        <View style={styles.glassEffect} />
+                        <View style={styles.heroCardIcon}>
+                            <Scan size={32} color={theme.colors.text} />
                         </View>
-                        <View style={[styles.mainCardDecoration, { backgroundColor: 'rgba(255,255,255,0.1)' }]} />
+                        <View>
+                            <Text style={styles.heroCardTitle}>Evaluate Papers</Text>
+                            <Text style={styles.heroCardSub}>Scan and analyze sheets</Text>
+                        </View>
                     </TouchableOpacity>
                 </View>
 
-                {/* Quick Actions */}
-                <View style={styles.quickActions}>
-                    <TouchableOpacity
-                        style={styles.quickActionBtn}
-                        onPress={() => navigation.navigate('Analytics')}
-                    >
-                        <ClipboardCheck color={theme.colors.primary} size={20} />
-                        <Text style={styles.quickActionText}>Analytics</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.quickActionBtn}>
-                        <BookOpen color={theme.colors.primary} size={20} />
-                        <Text style={styles.quickActionText}>Export</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.quickActionBtn}
-                        onPress={() => navigation.navigate('Settings')}
-                    >
-                        <SettingsIcon color={theme.colors.primary} size={20} />
-                        <Text style={styles.quickActionText}>Settings</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* Enhanced Stats */}
-                <View style={styles.statsContainer}>
-                    <View style={styles.statCard}>
-                        <View style={[styles.statIconCircle, { backgroundColor: '#dbeafe' }]}>
-                            <FileText color="#3b82f6" size={24} />
-                        </View>
-                        <Text style={styles.statCardValue}>{assessments.length}</Text>
-                        <Text style={styles.statCardLabel}>Total Exams</Text>
-                    </View>
-                    <View style={styles.statCard}>
-                        <View style={[styles.statIconCircle, { backgroundColor: '#dcfce7' }]}>
-                            <ClipboardCheck color="#10b981" size={24} />
-                        </View>
-                        <Text style={styles.statCardValue}>{evaluations.length}</Text>
-                        <Text style={styles.statCardLabel}>Papers Checked</Text>
-                    </View>
-                    <View style={styles.statCard}>
-                        <View style={[styles.statIconCircle, { backgroundColor: '#fef3c7' }]}>
-                            <Users color="#f59e0b" size={24} />
-                        </View>
-                        <Text style={styles.statCardValue}>{new Set(evaluations.map(e => e.studentName)).size}</Text>
-                        <Text style={styles.statCardLabel}>Students</Text>
-                    </View>
-                    <View style={styles.statCard}>
-                        <View style={[styles.statIconCircle, { backgroundColor: '#ddd6fe' }]}>
-                            <BookOpen color="#8b5cf6" size={24} />
-                        </View>
-                        <Text style={styles.statCardValue}>{Object.keys(subjects).length}</Text>
-                        <Text style={styles.statCardLabel}>Subjects</Text>
-                    </View>
-                </View>
-
-                {/* Subjects Grid */}
-                {Object.keys(subjects).length > 0 && (
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>My Subjects</Text>
-                    </View>
-                )}
-
-                <View style={styles.subjectsGrid}>
-                    {Object.keys(subjects).map(subject => {
-                        const subjectAssessments = assessments.filter(a => a.subject === subject);
-                        const subjectEvals = evaluations.filter(e => subjectAssessments.find(a => a.id === e.assessmentId));
-
-                        return (
-                            <TouchableOpacity
-                                key={subject}
-                                style={[styles.subjectCard]}
-                                onPress={() => navigation.navigate('SubjectDetails', { subject, classRoom: selectedClass })}
-                            >
-                                <View style={[styles.subjectIcon, { backgroundColor: theme.colors.primary + '15' }]}>
-                                    <BookOpen color={theme.colors.primary} size={24} />
-                                </View>
-                                <View style={styles.subjectInfo}>
-                                    <Text style={styles.subjectTitle}>{subject}</Text>
-                                    <Text style={styles.subjectStats}>
-                                        {subjectAssessments.length} Exams • {subjectEvals.length} Checked
+                {/* Class Tabs */}
+                {uniqueClasses.length > 0 && (
+                    <View style={styles.tabContainer}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
+                            {uniqueClasses.map(cls => (
+                                <TouchableOpacity
+                                    key={cls}
+                                    style={[styles.tabItem, selectedClass === cls && styles.tabItemActive]}
+                                    onPress={() => {
+                                        setSelectedClass(cls);
+                                    }}
+                                >
+                                    <Text style={[styles.tabText, selectedClass === cls && styles.tabTextActive]}>
+                                        {cls}
                                     </Text>
-                                </View>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
-
-                {/* Recent Exams List */}
-                <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Recent Exams</Text>
-                    {filteredAssessments.length > 5 && (
-                        <Text style={styles.viewAll}>View All</Text>
-                    )}
-                </View>
-
-                {filteredAssessments.length === 0 ? (
-                    <View style={styles.emptyState}>
-                        <BookOpen color={theme.colors.border} size={48} />
-                        <Text style={styles.emptyText}>No exams found.</Text>
-                        <Text style={styles.emptySubText}>Tap "Create Exam" to get started.</Text>
-                    </View>
-                ) : (
-                    <View style={styles.listContainer}>
-                        {filteredAssessments.slice(0, 5).map((assessment) => (
-                            <TouchableOpacity
-                                key={assessment.id}
-                                style={styles.assessmentCard}
-                                onPress={() => navigation.navigate('Evaluation', { assessment })}
-                            >
-                                <View style={styles.assessmentIcon}>
-                                    <FileText color="#fff" size={20} />
-                                </View>
-                                <View style={styles.assessmentContent}>
-                                    <Text style={styles.assessmentTitle} numberOfLines={1}>{assessment.title}</Text>
-                                    <View style={styles.assessmentMeta}>
-                                        <Text style={styles.assessmentMetaText}>{assessment.subject} • {assessment.classRoom}</Text>
-                                        <View style={styles.dot} />
-                                        <Text style={styles.assessmentMetaText}>{new Date(assessment.createdAt).toLocaleDateString()}</Text>
-                                    </View>
-                                </View>
-                                <ChevronRight color={theme.colors.textSecondary} size={20} />
-                            </TouchableOpacity>
-                        ))}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
                     </View>
                 )}
+
+                {/* Search Bar */}
+                <View style={styles.searchContainer}>
+                    <SearchBar
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        placeholder="Search by subject, teacher, or class..."
+                    />
+                </View>
+
+                {/* Exam Types Grid */}
+                {Object.keys(examGroups).length > 0 && (
+                    <View style={styles.subjectsSection}>
+                        <Text style={styles.sectionTitle}>Exam Sessions</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjectsScroll}>
+                            {Object.keys(examGroups).map(et => (
+                                <TouchableOpacity
+                                    key={et}
+                                    style={styles.subjectCardSmall}
+                                    onPress={() => navigation.navigate('ExamSessions', { examType: et, classRoom: selectedClass })}
+                                >
+                                    <View style={[styles.subjectIconSmall, { backgroundColor: theme.colors.accent + '20' }]}>
+                                        <ClipboardCheck color={theme.colors.accent} size={20} />
+                                    </View>
+                                    <Text style={styles.subjectCardTitle}>{et}</Text>
+                                    <Text style={styles.subjectCardCount}>
+                                        {Object.keys(examGroups[et]).length} Subjects
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {/* Unified Activity Feed */}
+                <View style={styles.activityFeed}>
+                    <Text style={styles.sectionTitle}>Recent Activity</Text>
+
+                    {(() => {
+                        // Unique-ify evaluations and active jobs to prevent duplicate key errors
+                        const combined = [...activeJobs, ...evaluations.slice(0, 10)];
+                        const uniqueMap = new Map();
+                        combined.forEach(item => {
+                            if (!uniqueMap.has(item.id)) {
+                                uniqueMap.set(item.id, item);
+                            }
+                        });
+                        const items = Array.from(uniqueMap.values());
+
+                        if (items.length === 0) {
+                            return (
+                                <View style={styles.emptyState}>
+                                    <Activity color={theme.colors.border} size={48} />
+                                    <Text style={styles.emptyText}>No activity yet.</Text>
+                                    <Text style={styles.emptySubText}>Try scanning a paper to see it here.</Text>
+                                </View>
+                            );
+                        }
+
+                        return items.map((item, idx) => {
+                            const isJob = 'progress' in item && item.status !== 'completed';
+                            const needsReview = item.results?.some((r: any) => r.needsReview);
+
+                            return (
+                                <TouchableOpacity
+                                    key={item.id}
+                                    style={styles.activityCard}
+                                    onPress={() => isJob ? null : navigation.navigate('EvaluationResult', { evaluation: item })}
+                                >
+                                    <View style={styles.activityIconBox}>
+                                        {isJob ? <Zap size={20} color={theme.colors.accent} /> :
+                                            needsReview ? <AlertCircle size={20} color={theme.colors.warning} /> :
+                                                <CheckCircle size={20} color={theme.colors.success} />}
+                                    </View>
+
+                                    <View style={styles.activityInfo}>
+                                        <Text style={styles.activityTitle} numberOfLines={1}>
+                                            {item.assessmentTitle || 'Untitled Assessment'}
+                                        </Text>
+                                        <Text style={styles.activitySub}>
+                                            Student: {item.studentName || 'Unknown'} - {' '}
+                                            {item.status === 'completed' ? (needsReview ? 'Needs Review' : 'Done') :
+                                                item.status === 'processing' ? 'Processing' :
+                                                    item.status === 'pending' ? 'Pending' :
+                                                        item.status === 'paused' ? 'Paused' :
+                                                            (item.status === 'error' ? (() => {
+                                                                const err = item.errorMessage || 'Unknown Error';
+                                                                if (err.includes('quota')) return 'Quota Limit Exceeded. Try again later.';
+                                                                if (err.includes('JSON')) return 'AI Parsing Error. Please retry.';
+                                                                if (err.includes('Network')) return 'Network Issue. Check internet.';
+                                                                return 'Evaluation Failed';
+                                                            })() : 'Unknown')}
+                                        </Text>
+
+                                        {isJob && (
+                                            <View style={styles.activityProgressContainer}>
+                                                <View style={[styles.activityProgressBar, { width: `${item.progress}%` }]} />
+                                            </View>
+                                        )}
+                                    </View>
+
+                                    {!isJob && (
+                                        <View style={styles.activityActions}>
+                                            <TouchableOpacity
+                                                style={styles.deleteAction}
+                                                onPress={() => handleDelete(item.id, item.studentName)}
+                                            >
+                                                <Trash2 size={16} color={theme.colors.error} />
+                                            </TouchableOpacity>
+                                            <ChevronRight size={18} color={theme.colors.textSecondary} />
+                                        </View>
+                                    )}
+
+                                    {isJob && (
+                                        <TouchableOpacity
+                                            style={styles.cancelJobBtn}
+                                            onPress={() => handleCancelJob(item.id)}
+                                        >
+                                            <Trash2 size={16} color={theme.colors.error} />
+                                        </TouchableOpacity>
+                                    )}
+                                </TouchableOpacity>
+                            );
+                        });
+                    })()}
+                </View>
             </ScrollView>
+
+            {/* Persistent Bottom Nav */}
+            <View style={styles.bottomNav}>
+                <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Home')}>
+                    <Home size={24} color={theme.colors.primary} />
+                    <Text style={[styles.navText, { color: theme.colors.primary }]}>Home</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('YearBrowser')}>
+                    <History size={24} color={theme.colors.textSecondary} />
+                    <Text style={styles.navText}>History</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Analytics')}>
+                    <BarChart2 size={24} color={theme.colors.textSecondary} />
+                    <Text style={styles.navText}>Analytics</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Settings')}>
+                    <SettingsIcon size={24} color={theme.colors.textSecondary} />
+                    <Text style={styles.navText}>Settings</Text>
+                </TouchableOpacity>
+            </View>
 
             <ApiKeyPrompt
                 visible={showApiKeyPrompt}
@@ -340,257 +407,121 @@ const styles = StyleSheet.create({
     header: {
         paddingHorizontal: theme.spacing.xl,
         paddingTop: theme.spacing.xl,
-        paddingBottom: theme.spacing.md,
+        paddingBottom: theme.spacing.xl,
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
+        alignItems: 'center',
     },
     greeting: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: theme.colors.textSecondary,
+    },
+    userName: {
         fontSize: 24,
         fontWeight: '800',
         color: theme.colors.text,
-        marginBottom: 4,
     },
-    subGreeting: {
-        fontSize: 14,
-        color: theme.colors.textSecondary,
-    },
-    settingsButton: {
-        padding: 8,
-        backgroundColor: theme.colors.surface,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    searchContainer: {
-        paddingHorizontal: theme.spacing.xl,
-        paddingVertical: theme.spacing.md,
-    },
-    scrollContent: {
-        padding: theme.spacing.lg,
-        paddingBottom: 100,
-    },
-    actionContainer: {
-        marginBottom: theme.spacing.xl,
-    },
-    mainCard: {
-        borderRadius: 20,
-        padding: 24,
-        height: 110,
-        justifyContent: 'center',
-        shadowColor: "#000",
-        shadowOffset: {
-            width: 0,
-            height: 4,
-        },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
-        elevation: 8,
-        overflow: 'hidden',
-        position: 'relative',
-    },
-    mainCardContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        zIndex: 2,
-    },
-    mainCardIconCircle: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 20,
-    },
-    mainCardTitle: {
-        color: 'white',
-        fontSize: 20,
-        fontWeight: 'bold',
-        marginBottom: 4,
-    },
-    mainCardSub: {
-        color: 'rgba(255,255,255,0.9)',
-        fontSize: 14,
-        fontWeight: '500',
-    },
-    mainCardDecoration: {
-        position: 'absolute',
-        right: -20,
-        bottom: -20,
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: 'rgba(255,255,255,0.15)',
-        zIndex: 1,
-    },
-    quickActions: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: theme.spacing.lg,
-        gap: 12,
-    },
-    quickActionBtn: {
+    headerLeft: {
         flex: 1,
+    },
+    headerRight: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: theme.colors.surface,
-        padding: 12,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
         gap: 8,
-    },
-    quickActionText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: theme.colors.text,
-    },
-    statsContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 12,
-        marginBottom: theme.spacing.xl,
-    },
-    statCard: {
-        flex: 1,
-        minWidth: '45%',
-        backgroundColor: theme.colors.surface,
-        padding: 16,
-        borderRadius: 16,
         alignItems: 'center',
-        borderWidth: 1,
-        borderColor: theme.colors.border,
     },
-    statIconCircle: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+    summaryCard: {
+        backgroundColor: theme.colors.surface + '80', // Glass effect
+        borderRadius: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderWidth: 1,
+        borderColor: theme.colors.border + '50',
+    },
+    summaryIconBox: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: theme.colors.background,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
     },
-    statCardValue: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: theme.colors.text,
-        marginBottom: 4,
+    summaryText: {
+        justifyContent: 'center',
     },
-    statCardLabel: {
-        fontSize: 12,
-        color: theme.colors.textSecondary,
-        textAlign: 'center',
-    },
-    statsRow: {
-        flexDirection: 'row',
-        backgroundColor: theme.colors.surface,
-        borderRadius: 16,
-        padding: 20,
-        marginBottom: theme.spacing.xl,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        alignItems: 'center',
-    },
-    statItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    statDivider: {
-        width: 1,
-        height: 40,
-        backgroundColor: theme.colors.border,
-    },
-    statValue: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: theme.colors.text,
-        marginBottom: 4,
-    },
-    statLabel: {
-        fontSize: 12,
-        color: theme.colors.textSecondary,
-        fontWeight: '600',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: theme.spacing.md,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: theme.colors.text,
-    },
-    viewAll: {
-        color: theme.colors.primary,
+    summaryVal: {
         fontSize: 14,
-        fontWeight: '600',
+        fontWeight: 'bold',
+        color: theme.colors.text,
+        lineHeight: 16,
     },
-    listContainer: {
-        gap: 12,
+    summaryLabel: {
+        fontSize: 10,
+        color: theme.colors.textSecondary,
+        textTransform: 'uppercase',
+        marginTop: -1,
     },
-    subjectsGrid: {
+    heroActions: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 12,
+        paddingHorizontal: theme.spacing.xl,
+        gap: 16,
         marginBottom: 24,
     },
-    subjectCard: {
-        width: (width - theme.spacing.lg * 2 - 12) / 2, // 2 columns
-        backgroundColor: theme.colors.surface,
+    heroCard: {
+        flex: 1,
+        height: 120,
+        borderRadius: 24,
+        backgroundColor: theme.colors.primary + '50', // Glass effect
         padding: 16,
-        borderRadius: 16,
+        justifyContent: 'space-between',
         borderWidth: 1,
-        borderColor: theme.colors.border,
+        borderColor: 'rgba(255,255,255,0.1)',
+        position: 'relative',
+        overflow: 'hidden',
     },
-    subjectIcon: {
+    glassEffect: {
+        position: 'absolute',
+        top: -40,
+        right: -40,
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+    },
+    heroCardIcon: {
         width: 40,
         height: 40,
-        borderRadius: 10,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255,255,255,0.2)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
     },
-    subjectInfo: {
-        gap: 4,
+    heroCardTitle: {
+        color: '#fff',
+        fontSize: 15,
+        fontWeight: 'bold',
     },
-    subjectTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: theme.colors.text,
-    },
-    subjectStats: {
-        fontSize: 12,
-        color: theme.colors.textSecondary,
-    },
-    assessmentCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: theme.colors.surface,
-        padding: 16,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
+    heroCardSub: {
+        color: 'rgba(255,255,255,0.7)',
+        fontSize: 10,
     },
     tabContainer: {
-        marginBottom: 8,
+        marginBottom: 24,
     },
     tabScroll: {
         paddingHorizontal: theme.spacing.xl,
         gap: 12,
-        paddingBottom: 8,
     },
     tabItem: {
-        paddingHorizontal: 20,
-        paddingVertical: 10,
-        borderRadius: 20,
-        backgroundColor: theme.colors.surface,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: theme.colors.surface + '80',
         borderWidth: 1,
-        borderColor: theme.colors.border,
+        borderColor: theme.colors.border + '50',
     },
     tabItemActive: {
         backgroundColor: theme.colors.primary,
@@ -599,58 +530,165 @@ const styles = StyleSheet.create({
     tabText: {
         color: theme.colors.textSecondary,
         fontWeight: '600',
-        fontSize: 14,
+        fontSize: 12,
     },
     tabTextActive: {
         color: '#fff',
     },
-    assessmentIcon: {
-        width: 48,
-        height: 48,
+    searchContainer: {
+        paddingHorizontal: theme.spacing.xl,
+        marginBottom: 24,
+    },
+    subjectsSection: {
+        marginBottom: 24,
+        paddingHorizontal: theme.spacing.xl,
+    },
+    subjectsScroll: {
+        marginHorizontal: -theme.spacing.xl,
+        paddingHorizontal: theme.spacing.xl,
+        gap: 12,
+    },
+    subjectCardSmall: {
+        width: 110,
+        padding: 16,
+        borderRadius: 20,
+        backgroundColor: theme.colors.surface + '50',
+        borderWidth: 1,
+        borderColor: theme.colors.border + '30',
+        alignItems: 'center',
+    },
+    subjectIconSmall: {
+        width: 40,
+        height: 40,
         borderRadius: 12,
-        backgroundColor: theme.colors.text,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 16,
+        marginBottom: 8,
     },
-    assessmentContent: {
-        flex: 1,
-    },
-    assessmentTitle: {
-        fontSize: 16,
-        fontWeight: '600',
+    subjectCardTitle: {
+        fontSize: 13,
+        fontWeight: 'bold',
         color: theme.colors.text,
-        marginBottom: 6,
+        textAlign: 'center',
     },
-    assessmentMeta: {
+    subjectCardCount: {
+        fontSize: 10,
+        color: theme.colors.textSecondary,
+        marginTop: 2,
+    },
+    activityFeed: {
+        paddingHorizontal: theme.spacing.xl,
+    },
+    activityCard: {
         flexDirection: 'row',
         alignItems: 'center',
+        backgroundColor: theme.colors.surface + '50',
+        padding: 16,
+        borderRadius: 20,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border + '30',
     },
-    assessmentMetaText: {
-        fontSize: 13,
+    activityIconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: theme.colors.background,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    activityInfo: {
+        flex: 1,
+    },
+    activityTitle: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: theme.colors.text,
+        marginBottom: 2,
+    },
+    activitySub: {
+        fontSize: 12,
         color: theme.colors.textSecondary,
     },
-    dot: {
-        width: 3,
-        height: 3,
-        borderRadius: 1.5,
-        backgroundColor: theme.colors.textSecondary,
-        marginHorizontal: 6,
+    activityProgressContainer: {
+        height: 4,
+        backgroundColor: theme.colors.border,
+        borderRadius: 2,
+        marginTop: 8,
+        width: '100%',
+    },
+    activityProgressBar: {
+        height: '100%',
+        backgroundColor: theme.colors.accent,
+        borderRadius: 2,
+    },
+    bottomNav: {
+        position: 'absolute',
+        bottom: 30,
+        left: 24,
+        right: 24,
+        height: 64,
+        backgroundColor: theme.colors.surface + 'CC',
+        borderRadius: 32,
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+        paddingHorizontal: 16,
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+    },
+    navItem: {
+        alignItems: 'center',
+        gap: 4,
+    },
+    navText: {
+        fontSize: 10,
+        fontWeight: 'bold',
+        color: theme.colors.textSecondary,
+    },
+    scrollContent: {
+        paddingTop: 10,
+        paddingBottom: 150,
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: theme.colors.text,
+        marginBottom: 16,
     },
     emptyState: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 40,
+        paddingVertical: 60,
+        backgroundColor: theme.colors.surface + '30',
+        borderRadius: 24,
     },
     emptyText: {
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: 'bold',
         color: theme.colors.text,
         marginTop: 16,
-        marginBottom: 8,
     },
     emptySubText: {
         fontSize: 14,
         color: theme.colors.textSecondary,
+        marginTop: 4,
+    },
+    activityActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    deleteAction: {
+        padding: 4,
+    },
+    cancelJobBtn: {
+        padding: 8,
     },
 });

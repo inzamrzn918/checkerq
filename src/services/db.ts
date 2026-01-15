@@ -22,7 +22,22 @@ export const initDB = async () => {
                     teacherName TEXT,
                     subject TEXT,
                     classRoom TEXT,
+                    examType TEXT DEFAULT "General",
+                    academicYear TEXT,
+                    languages TEXT,
+                    primaryLanguage TEXT DEFAULT "English",
                     paperImages TEXT,
+                    createdAt INTEGER NOT NULL
+                )
+            `);
+
+            await database.execAsync(`
+                CREATE TABLE IF NOT EXISTS students (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    name TEXT NOT NULL,
+                    rollNo TEXT,
+                    classRoom TEXT,
+                    academicYear TEXT,
                     createdAt INTEGER NOT NULL
                 )
             `);
@@ -44,6 +59,7 @@ export const initDB = async () => {
                 CREATE TABLE IF NOT EXISTS evaluations (
                     id TEXT PRIMARY KEY NOT NULL,
                     assessmentId TEXT NOT NULL,
+                    studentId TEXT,
                     studentImage TEXT NOT NULL,
                     totalMarks INTEGER NOT NULL,
                     obtainedMarks INTEGER NOT NULL,
@@ -51,7 +67,8 @@ export const initDB = async () => {
                     results TEXT,
                     createdAt INTEGER NOT NULL,
                     status TEXT DEFAULT 'completed',
-                    FOREIGN KEY (assessmentId) REFERENCES assessments (id) ON DELETE CASCADE
+                    FOREIGN KEY (assessmentId) REFERENCES assessments (id) ON DELETE CASCADE,
+                    FOREIGN KEY (studentId) REFERENCES students (id) ON DELETE SET NULL
                 )
             `);
 
@@ -65,7 +82,6 @@ export const initDB = async () => {
         }
     })();
 
-    // Attempt to add studentName column if it's missing (simple migration)
     initPromise.then(async (database) => {
         try {
             await database.execAsync('ALTER TABLE evaluations ADD COLUMN studentName TEXT;');
@@ -73,6 +89,42 @@ export const initDB = async () => {
 
         try {
             await database.execAsync('ALTER TABLE evaluations ADD COLUMN pages TEXT;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE evaluations ADD COLUMN studentRollNo TEXT;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE evaluations ADD COLUMN assessmentTitle TEXT;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE evaluations ADD COLUMN progress INTEGER DEFAULT 0;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE evaluations ADD COLUMN errorMessage TEXT;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE assessments ADD COLUMN examType TEXT DEFAULT "General";');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE assessments ADD COLUMN academicYear TEXT;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE assessments ADD COLUMN languages TEXT;');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE assessments ADD COLUMN primaryLanguage TEXT DEFAULT "English";');
+        } catch (e) { /* ignore */ }
+
+        try {
+            await database.execAsync('ALTER TABLE evaluations ADD COLUMN studentId TEXT;');
         } catch (e) { /* ignore */ }
     });
 

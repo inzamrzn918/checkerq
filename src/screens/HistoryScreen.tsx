@@ -1,24 +1,29 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
 import { ChevronLeft, FileText, Search, Trash2, Calendar } from 'lucide-react-native';
 import { StorageService, Assessment, Evaluation } from '../services/storage';
 
-export default function HistoryScreen({ navigation }: any) {
+export default function HistoryScreen({ navigation, route }: any) {
+    const { studentId, studentName } = route.params || {};
     const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
     const [assessments, setAssessments] = useState<Assessment[]>([]);
     const [refreshing, setRefreshing] = useState(false);
 
     const loadData = useCallback(async () => {
-        const [eData, aData] = await Promise.all([
-            StorageService.getEvaluations(),
-            StorageService.getAssessments()
-        ]);
+        let eData: Evaluation[];
+        if (studentId) {
+            eData = await StorageService.getStudentEvaluations(studentId);
+        } else {
+            eData = await StorageService.getEvaluations();
+        }
+
+        const aData = await StorageService.getAssessments();
         setEvaluations(eData);
         setAssessments(aData);
-    }, []);
+    }, [studentId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -32,13 +37,26 @@ export default function HistoryScreen({ navigation }: any) {
         setRefreshing(false);
     };
 
-    const handleDelete = async (id: string) => {
-        try {
-            await StorageService.deleteEvaluation(id);
-            loadData();
-        } catch (error) {
-            console.error('Delete failed:', error);
-        }
+    const handleDelete = async (id: string, name?: string) => {
+        Alert.alert(
+            'Delete Result?',
+            `Are you sure you want to delete the result for ${name || 'this student'}? This action cannot be undone.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await StorageService.deleteEvaluation(id);
+                            loadData();
+                        } catch (error) {
+                            console.error('Delete failed:', error);
+                        }
+                    }
+                }
+            ]
+        );
     };
 
     return (
@@ -47,7 +65,7 @@ export default function HistoryScreen({ navigation }: any) {
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <ChevronLeft color={theme.colors.text} size={28} />
                 </TouchableOpacity>
-                <Text style={styles.title}>Evaluation History</Text>
+                <Text style={styles.title}>{studentName ? `${studentName}'s Results` : 'Evaluation History'}</Text>
                 <View style={{ width: 28 }} />
             </View>
 
@@ -90,7 +108,7 @@ export default function HistoryScreen({ navigation }: any) {
                                     </View>
                                     <TouchableOpacity
                                         style={styles.deleteBtn}
-                                        onPress={() => handleDelete(item.id)}
+                                        onPress={() => handleDelete(item.id, item.studentName)}
                                     >
                                         <Trash2 size={20} color={theme.colors.error} />
                                     </TouchableOpacity>

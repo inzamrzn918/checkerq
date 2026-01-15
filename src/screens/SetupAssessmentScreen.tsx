@@ -15,7 +15,11 @@ export default function SetupAssessmentScreen({ navigation }: any) {
     const [teacherName, setTeacherName] = useState('');
     const [subject, setSubject] = useState('');
     const [classRoom, setClassRoom] = useState('');
+    const [academicYear, setAcademicYear] = useState('2024-25'); // Default
+    const [examType, setExamType] = useState('Unit Test'); // Default
     const [loading, setLoading] = useState(false);
+
+    const examTypes = ['Class Test', 'Unit Test', 'Half Yearly', 'Pre Board', 'Annual Exam'];
 
     // Get upload limits from config
     const uploadLimits = config?.upload_limits;
@@ -171,11 +175,12 @@ export default function SetupAssessmentScreen({ navigation }: any) {
         setLoading(true);
         try {
             // We'll pass all images to extraction
-            const questions = await GeminiService.extractQuestions(images);
+            const { questions, languages } = await GeminiService.extractQuestions(images);
             navigation.navigate('ReviewQuestions', {
                 questions,
+                languages,
                 paperImages: images,
-                metadata: { teacherName, subject, classRoom }
+                metadata: { teacherName, subject, classRoom, examType, academicYear }
             });
         } catch (error) {
             Alert.alert('Error', 'Failed to extract questions. Please check your API key and try again.');
@@ -231,6 +236,34 @@ export default function SetupAssessmentScreen({ navigation }: any) {
                         value={classRoom}
                         onChangeText={setClassRoom}
                     />
+                </View>
+
+                <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Academic Year</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="e.g. 2024-25"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={academicYear}
+                        onChangeText={setAcademicYear}
+                    />
+                </View>
+
+                <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Exam Type</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.examTypeScroll}>
+                        {examTypes.map(type => (
+                            <TouchableOpacity
+                                key={type}
+                                style={[styles.examTypeItem, examType === type && styles.examTypeActive]}
+                                onPress={() => setExamType(type)}
+                            >
+                                <Text style={[styles.examTypeText, examType === type && styles.examTypeTextActive]}>
+                                    {type}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
                 </View>
 
                 <Text style={[styles.instruction, { marginTop: 24 }]}>
@@ -318,7 +351,7 @@ const styles = StyleSheet.create({
         color: theme.colors.text,
         fontSize: 22,
         fontWeight: 'bold',
-        marginBottom: 8,
+        marginBottom: 16, // Increased from 8
     },
     subInstruction: {
         color: theme.colors.textSecondary,
@@ -383,7 +416,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
     inputGroup: {
-        marginBottom: theme.spacing.md,
+        marginBottom: 20, // Increased from theme.spacing.md (16)
     },
     label: {
         color: theme.colors.textSecondary,
@@ -431,5 +464,29 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderWidth: 2,
         borderColor: theme.colors.background,
+    },
+    examTypeScroll: {
+        gap: 10,
+        paddingVertical: 4,
+    },
+    examTypeItem: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    examTypeActive: {
+        backgroundColor: theme.colors.primary,
+        borderColor: theme.colors.primary,
+    },
+    examTypeText: {
+        color: theme.colors.textSecondary,
+        fontWeight: '600',
+        fontSize: 14,
+    },
+    examTypeTextActive: {
+        color: '#fff',
     },
 });

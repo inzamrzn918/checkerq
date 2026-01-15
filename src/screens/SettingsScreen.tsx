@@ -3,9 +3,10 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Linking, Ac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { ChevronLeft, Save, Key, Trash2, ExternalLink, Download, Upload, Cloud, Database, LogOut, Award } from 'lucide-react-native';
+import { ChevronLeft, Save, Key, Trash2, ExternalLink, Download, Upload, Cloud, Database, LogOut, Award, Activity } from 'lucide-react-native';
 import { settingsService } from '../services/settings';
 import { BackupService } from '../services/backup';
+import { StorageService } from '../services/storage';
 import { showError, showSuccess, showConfirm } from '../utils/errorHandler';
 import authService from '../services/authService';
 import licenseService from '../services/licenseService';
@@ -13,12 +14,16 @@ import licenseService from '../services/licenseService';
 export default function SettingsScreen({ navigation }: any) {
     const [geminiKey, setGeminiKey] = useState('');
     const [mistralKey, setMistralKey] = useState('');
+    const [maxConcurrent, setMaxConcurrent] = useState('3');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [backupPrefs, setBackupPrefs] = useState<any>(null);
     const [backupLoading, setBackupLoading] = useState(false);
     const [currentUser, setCurrentUser] = useState<any>(null);
     const [currentLicense, setCurrentLicense] = useState<any>(null);
+    const [storageUsage, setStorageUsage] = useState<number>(0);
+    const [offlineMode, setOfflineMode] = useState(false);
+    const [evalStats, setEvalStats] = useState({ today: 0, month: 0 });
 
     // Removed the initial useEffect that called loadKeys() as loadData will handle everything on focus.
 
@@ -35,12 +40,23 @@ export default function SettingsScreen({ navigation }: any) {
             const prefs = await settingsService.getBackupPreferences();
             const user = await authService.getCurrentUser();
             const license = await licenseService.getCurrentLicense();
+            const maxC = await settingsService.getMaxConcurrent();
 
             setGeminiKey(keys.gemini || '');
             setMistralKey(keys.mistral || '');
+            setMaxConcurrent(maxC.toString());
             setBackupPrefs(prefs);
             setCurrentUser(user);
             setCurrentLicense(license);
+
+            const usage = await StorageService.getStorageUsage();
+            setStorageUsage(usage);
+
+            const isOffline = await settingsService.getOfflineMode();
+            setOfflineMode(isOffline);
+
+            const stats = await StorageService.getEvaluationStats();
+            setEvalStats(stats);
         } catch (error) {
             Alert.alert('Error', 'Failed to load settings.');
         } finally {
@@ -81,7 +97,9 @@ export default function SettingsScreen({ navigation }: any) {
                 gemini: geminiKey.trim(),
                 mistral: mistralKey.trim() || undefined,
             });
-            Alert.alert('Success', 'API keys saved successfully!');
+            await settingsService.setMaxConcurrent(parseInt(maxConcurrent, 10) || 3);
+            await settingsService.setOfflineMode(offlineMode);
+            Alert.alert('Success', 'Settings saved successfully!');
             navigation.goBack();
         } catch (error) {
             Alert.alert('Error', 'Failed to save API keys. Please try again.');
@@ -92,6 +110,15 @@ export default function SettingsScreen({ navigation }: any) {
 
     const openLink = (url: string) => {
         Linking.openURL(url);
+    };
+
+    const formatSize = (bytes: number) => {
+        if (bytes === 0) return '0.00 MB';
+        // We'll show in MB for small sizes, GB for large
+        const mb = bytes / (1024 * 1024);
+        if (mb < 1024) return `${mb.toFixed(2)} MB`;
+        const gb = mb / 1024;
+        return `${gb.toFixed(2)} GB`;
     };
 
     if (loading) {
@@ -175,6 +202,42 @@ export default function SettingsScreen({ navigation }: any) {
                         <TouchableOpacity onPress={() => openLink('https://ai.google.dev/gemini-api/docs/api-key')}>
                             <Text style={styles.linkText}>How to get Gemini API key →</Text>
                         </TouchableOpacity>
+
+                        {/* Gemini Usage Tracker */}
+                        <View style={styles.quotaBox}>
+                            <View style={styles.quotaHeader}>
+                                <Activity size={12} color={theme.colors.textSecondary} />
+                                <Text style={styles.quotaTitle}>Local Usage Tracking</Text>
+                            </View>
+                            <View style={styles.quotaRow}>
+                                <View style={styles.quotaItem}>
+                                    <Text style={styles.quotaVal}>{evalStats.today}</Text>
+                                    <Text style={styles.quotaLabel}>Today</Text>
+                                </View>
+                                <View style={styles.quotaDivider} />
+                                <View style={styles.quotaItem}>
+                                    <Text style={styles.quotaVal}>{evalStats.month}</Text>
+                                    <Text style={styles.quotaLabel}>This Month</Text>
+                                </View>
+                                {currentLicense && currentLicense.max_evaluations_per_month && (
+                                    <>
+                                        <View style={styles.quotaDivider} />
+                                        <View style={styles.quotaItem}>
+                                            <Text style={styles.quotaVal}>{currentLicense.max_evaluations_per_month}</Text>
+                                            <Text style={styles.quotaLabel}>License Limit</Text>
+                                        </View>
+                                    </>
+                                )}
+                            </View>
+                            {currentLicense && currentLicense.max_evaluations_per_month && (
+                                <View style={styles.meterContainer}>
+                                    <View style={[styles.meterFill, {
+                                        width: `${Math.min(100, (evalStats.month / currentLicense.max_evaluations_per_month) * 100)}%`,
+                                        backgroundColor: (evalStats.month / currentLicense.max_evaluations_per_month) > 0.9 ? theme.colors.error : theme.colors.primary
+                                    }]} />
+                                </View>
+                            )}
+                        </View>
                     </View>
 
                     <View style={styles.inputGroup}>
@@ -196,6 +259,73 @@ export default function SettingsScreen({ navigation }: any) {
                             <Text style={styles.linkText}>How to get Mistral API key →</Text>
                         </TouchableOpacity>
                         <Text style={styles.hint}>If not provided, Gemini will be used for all operations.</Text>
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Max Concurrent Evaluations</Text>
+                        <View style={styles.inputContainer}>
+                            <Database color={theme.colors.textSecondary} size={20} style={styles.inputIcon} />
+                            <TextInput
+                                style={styles.input}
+                                placeholder="3"
+                                placeholderTextColor={theme.colors.textSecondary}
+                                value={maxConcurrent}
+                                onChangeText={setMaxConcurrent}
+                                keyboardType="numeric"
+                            />
+                        </View>
+                        <Text style={styles.hint}>Recommended: 1-5. Higher values may cause rate limits.</Text>
+                    </View>
+                </View>
+
+                {/* Storage Management Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Storage Management</Text>
+                    <View style={styles.storageCard}>
+                        <View style={styles.storageInfo}>
+                            <Database color={theme.colors.primary} size={24} />
+                            <View>
+                                <Text style={styles.storageUsageText}>{formatSize(storageUsage)}</Text>
+                                <Text style={styles.storageSubtext}>Total app data & images</Text>
+                            </View>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.refreshBtn}
+                            onPress={async () => {
+                                const usage = await StorageService.getStorageUsage();
+                                setStorageUsage(usage);
+                            }}
+                        >
+                            <Text style={styles.refreshBtnText}>Refresh</Text>
+                        </TouchableOpacity>
+                    </View>
+                    <Text style={styles.hint}>Images and cached evaluations consume the most space.</Text>
+                </View>
+
+                {/* Privacy & Connection Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Privacy & Connection</Text>
+                    <View style={styles.privacyCard}>
+                        <View style={styles.privacyInfo}>
+                            <Cloud color={offlineMode ? theme.colors.textSecondary : theme.colors.primary} size={24} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.privacyTitle}>Offline Mode</Text>
+                                <Text style={styles.privacySubtext}>Disable all backend API calls (License checks, Profile sync, etc.)</Text>
+                            </View>
+                            <Switch
+                                value={offlineMode}
+                                onValueChange={setOfflineMode}
+                                trackColor={{ false: theme.colors.border, true: theme.colors.primary + '50' }}
+                                thumbColor={offlineMode ? theme.colors.primary : '#f4f3f4'}
+                            />
+                        </View>
+                        {offlineMode && (
+                            <View style={styles.offlineWarning}>
+                                <Text style={styles.offlineWarningText}>
+                                    Note: You are currently running in purely local mode. AI extraction (Gemini) will still work if you have an internet connection, but backend account sync is paused.
+                                </Text>
+                            </View>
+                        )}
                     </View>
                 </View>
 
@@ -356,5 +486,124 @@ const styles = StyleSheet.create({
     },
     logoutText: {
         color: theme.colors.error,
+    },
+    storageCard: {
+        backgroundColor: theme.colors.surface,
+        borderRadius: 16,
+        padding: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    storageInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+    },
+    storageUsageText: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: theme.colors.text,
+    },
+    storageSubtext: {
+        fontSize: 12,
+        color: theme.colors.textSecondary,
+    },
+    refreshBtn: {
+        padding: 8,
+    },
+    refreshBtnText: {
+        color: theme.colors.primary,
+        fontWeight: 'bold',
+    },
+    privacyCard: {
+        backgroundColor: theme.colors.surface,
+        borderRadius: 16,
+        padding: 20,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    privacyInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+    },
+    privacyTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: theme.colors.text,
+    },
+    privacySubtext: {
+        fontSize: 12,
+        color: theme.colors.textSecondary,
+        marginTop: 2,
+    },
+    offlineWarning: {
+        marginTop: 16,
+        padding: 12,
+        backgroundColor: theme.colors.warning + '10',
+        borderRadius: 8,
+        borderLeftWidth: 4,
+        borderLeftColor: theme.colors.warning,
+    },
+    offlineWarningText: {
+        fontSize: 12,
+        color: theme.colors.text,
+        lineHeight: 18,
+    },
+    quotaBox: {
+        backgroundColor: theme.colors.surface + '60',
+        borderRadius: 12,
+        padding: 12,
+        marginTop: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border + '40',
+    },
+    quotaHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 8,
+    },
+    quotaTitle: {
+        fontSize: 11,
+        color: theme.colors.textSecondary,
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+    },
+    quotaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-around',
+    },
+    quotaItem: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    quotaVal: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: theme.colors.text,
+    },
+    quotaLabel: {
+        fontSize: 10,
+        color: theme.colors.textSecondary,
+    },
+    quotaDivider: {
+        width: 1,
+        height: 20,
+        backgroundColor: theme.colors.border + '60',
+    },
+    meterContainer: {
+        height: 4,
+        backgroundColor: theme.colors.border + '40',
+        borderRadius: 2,
+        marginTop: 12,
+        overflow: 'hidden',
+    },
+    meterFill: {
+        height: '100%',
     },
 });

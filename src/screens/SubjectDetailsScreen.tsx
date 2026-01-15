@@ -1,13 +1,13 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../theme/theme';
-import { ChevronLeft, User, FileText, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, User, FileText, ChevronRight, Trash2 } from 'lucide-react-native';
 import { StorageService, Assessment, Evaluation } from '../services/storage';
 
 export default function SubjectDetailsScreen({ route, navigation }: any) {
-    const { subject, classRoom } = route.params;
+    const { subject, classRoom, examType } = route.params;
     const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
     const [assessments, setAssessments] = useState<Assessment[]>([]);
     const [refreshing, setRefreshing] = useState(false);
@@ -18,10 +18,11 @@ export default function SubjectDetailsScreen({ route, navigation }: any) {
             StorageService.getEvaluations()
         ]);
 
-        // Filter assessments for this subject (and class if provided)
+        // Filter assessments for this subject, class, and examType
         const relevantAssessments = aData.filter(a =>
             a.subject === subject &&
-            (!classRoom || a.classRoom === classRoom)
+            (!classRoom || a.classRoom === classRoom) &&
+            (!examType || a.examType === examType)
         );
 
         // Filter evaluations that belong to these assessments
@@ -43,6 +44,28 @@ export default function SubjectDetailsScreen({ route, navigation }: any) {
         setRefreshing(true);
         await loadData();
         setRefreshing(false);
+    };
+
+    const handleDeleteResult = async (id: string, name?: string) => {
+        Alert.alert(
+            'Delete Result?',
+            `Are you sure you want to delete the result for ${name || 'this student'}?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await StorageService.deleteEvaluation(id);
+                            loadData();
+                        } catch (error) {
+                            console.error('Delete failed:', error);
+                        }
+                    }
+                }
+            ]
+        );
     };
 
     // Group evaluations by Student
@@ -69,7 +92,7 @@ export default function SubjectDetailsScreen({ route, navigation }: any) {
                     <ChevronLeft color={theme.colors.text} size={28} />
                 </TouchableOpacity>
                 <View>
-                    <Text style={styles.title}>{subject}</Text>
+                    <Text style={styles.title}>{subject} - {examType || 'General'}</Text>
                     <Text style={styles.subtitle}>{classRoom || 'All Classes'}</Text>
                 </View>
                 <View style={{ width: 28 }} />
@@ -118,6 +141,12 @@ export default function SubjectDetailsScreen({ route, navigation }: any) {
                                         </Text>
                                     </View>
                                 </View>
+                                <TouchableOpacity
+                                    style={styles.deleteBtn}
+                                    onPress={() => handleDeleteResult(latestEval.id, studentName as string)}
+                                >
+                                    <Trash2 size={18} color={theme.colors.error} />
+                                </TouchableOpacity>
                                 <ChevronRight color={theme.colors.textSecondary} size={20} />
                             </TouchableOpacity>
                         );
@@ -222,5 +251,9 @@ const styles = StyleSheet.create({
         color: theme.colors.textSecondary,
         fontSize: 16,
         marginTop: 16,
+    },
+    deleteBtn: {
+        padding: 8,
+        marginRight: 4,
     },
 });

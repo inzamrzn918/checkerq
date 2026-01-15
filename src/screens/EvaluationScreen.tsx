@@ -10,7 +10,9 @@ import { StorageService, Assessment } from '../services/storage';
 import { settingsService } from '../services/settings';
 import { useFocusEffect } from '@react-navigation/native';
 
-type Step = 'SELECT' | 'COVER_SCAN' | 'COVER_VERIFY' | 'ANSWER_SCAN' | 'ANSWER_VERIFY' | 'SUMMARY';
+import { evaluationQueue } from '../services/queue';
+
+type Step = 'SELECT' | 'COVER_SCAN' | 'COVER_VERIFY' | 'MANUAL_INFO' | 'ANSWER_SCAN' | 'LANGUAGE_SELECT' | 'SUMMARY';
 
 export default function EvaluationScreen({ route, navigation }: any) {
     const [step, setStep] = useState<Step>('SELECT');
@@ -22,8 +24,28 @@ export default function EvaluationScreen({ route, navigation }: any) {
     const [pages, setPages] = useState<{ uri: string; type: 'cover' | 'answer'; evaluation?: PaperEvaluation }[]>([]);
     const [currentImage, setCurrentImage] = useState<string | null>(null);
 
+    const [selectedLanguage, setSelectedLanguage] = useState('English');
     const [loading, setLoading] = useState(false);
     const [statusMsg, setStatusMsg] = useState('');
+
+    const defaultLanguages = [
+        'Assamese', 'Bengali', 'Bodo', 'Dogri', 'English', 'Gujarati', 'Hindi', 'Kannada', 'Kashmiri',
+        'Konkani', 'Maithili', 'Malayalam', 'Manipuri', 'Marathi', 'Nepali', 'Odia', 'Punjabi',
+        'Sanskrit', 'Santali', 'Sindhi', 'Tamil', 'Telugu', 'Urdu'
+    ];
+    // Use assessment languages if available and is a valid array, otherwise fall back to default
+    const languages = (selectedAssessment?.languages && Array.isArray(selectedAssessment.languages) && selectedAssessment.languages.length > 0)
+        ? selectedAssessment.languages
+        : defaultLanguages;
+
+    // Pre-select if not already set by user interaction
+    React.useEffect(() => {
+        if (selectedAssessment?.primaryLanguage && languages.includes(selectedAssessment.primaryLanguage)) {
+            setSelectedLanguage(selectedAssessment.primaryLanguage);
+        } else if (languages.length > 0) {
+            setSelectedLanguage(languages[0]);
+        }
+    }, [selectedAssessment]);
 
     useFocusEffect(
         useCallback(() => {
@@ -57,12 +79,24 @@ export default function EvaluationScreen({ route, navigation }: any) {
 
         const result = camera
             ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
-            : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+            : await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                quality: 0.8,
+                allowsMultipleSelection: true
+            });
 
         if (!result.canceled) {
-            setCurrentImage(result.assets[0].uri);
-            if (step === 'COVER_SCAN') processCoverPage(result.assets[0].uri);
-            if (step === 'ANSWER_SCAN') processAnswerPage(result.assets[0].uri);
+            if (step === 'COVER_SCAN') {
+                setCurrentImage(result.assets[0].uri);
+                processCoverPage(result.assets[0].uri);
+            } else if (step === 'ANSWER_SCAN') {
+                const newPages = result.assets.map(asset => ({
+                    uri: asset.uri,
+                    type: 'answer' as const
+                }));
+                setPages(prev => [...prev, ...newPages]);
+                setStep('SUMMARY');
+            }
         }
     };
 
@@ -94,60 +128,27 @@ export default function EvaluationScreen({ route, navigation }: any) {
     };
 
     const processAnswerPage = async (uri: string) => {
-        if (!selectedAssessment) return;
-        setLoading(true);
-        setStatusMsg('Evaluating Answer Sheet...');
-
-        try {
-            // 1. OCR
-            const mistralKey = MistralService.getApiKey();
-            let text = "";
-
-            if (mistralKey) {
-                setStatusMsg('Reading handwriting (Mistral)...');
-                text = await MistralService.extractText(uri);
-            } else {
-                setStatusMsg('Reading handwriting (Gemini)...');
-                text = await GeminiService.extractText(uri);
-            }
-
-            // 2. Evaluate
-            setStatusMsg('Grading (Gemini)...');
-            const evalResult = await GeminiService.evaluatePaperText(text, selectedAssessment.questions);
-
-            // Add to pages temporarily for verification
-            setPages([...pages, { uri, type: 'answer', evaluation: evalResult }]);
-            setStep('SUMMARY'); // For now, go straight to summary/next loop, typically we'd verify each page
-        } catch (error) {
-            Alert.alert('Evaluation Failed', 'Try again or skip this page.');
-        } finally {
-            setLoading(false);
-            setCurrentImage(null);
-        }
+        setPages([...pages, { uri, type: 'answer' }]);
+        setCurrentImage(null);
+        setStep('SUMMARY');
     };
 
     const handleFinish = async () => {
-        // Aggregate results
-        const answerPages = pages.filter(p => p.type === 'answer');
-        const aggregatedEval = {
-            id: Math.random().toString(36).substr(2, 9),
-            assessmentId: selectedAssessment!.id,
-            studentImage: pages.length > 0 ? pages[0].uri : '', // cover or first page
-            pages: pages,
-            studentName: studentInfo.name,
-            totalMarks: selectedAssessment!.questions.reduce((sum, q) => sum + q.marks, 0),
-            obtainedMarks: answerPages.reduce((sum, p) => sum + (p.evaluation?.obtainedMarks || 0), 0),
-            overallFeedback: "Evaluated across " + answerPages.length + " pages.",
-            results: answerPages.flatMap(p => p.evaluation?.results || []),
-            createdAt: Date.now()
-        };
+        if (!selectedAssessment) return;
 
-        // Navigate to result screen for final save
-        navigation.navigate('EvaluationResult', {
-            evaluation: aggregatedEval,
-            assessment: selectedAssessment,
-            answerSheet: aggregatedEval.studentImage // pass cover as main image for now
+        const jobId = Math.random().toString(36).substr(2, 9);
+        await evaluationQueue.addJob({
+            id: jobId,
+            assessmentId: selectedAssessment.id,
+            assessmentTitle: selectedAssessment.title,
+            pages: pages.map(p => ({ uri: p.uri, type: p.type })),
+            language: selectedLanguage,
+            studentName: studentInfo.name,
+            studentRollNo: studentInfo.rollNo
         });
+
+        Alert.alert('Evaluation Started', 'The evaluation is processing in the background. You can track it on the dashboard.');
+        navigation.navigate('Home');
     };
 
     const renderSelectAssessment = () => (
@@ -189,7 +190,7 @@ export default function EvaluationScreen({ route, navigation }: any) {
                 <Text style={styles.label}>Roll No / ID</Text>
                 <TextInput
                     style={styles.input}
-                    value={studentInfo.rollNo}
+                    value={studentInfo.rollNo || ''}
                     onChangeText={t => setStudentInfo({ ...studentInfo, rollNo: t })}
                     placeholder="Enter Roll No"
                 />
@@ -201,6 +202,63 @@ export default function EvaluationScreen({ route, navigation }: any) {
             </TouchableOpacity>
         </View>
     );
+
+    const renderManualInfo = () => (
+        <View style={styles.verifyContainer}>
+            <Text style={styles.stepTitle}>Enter Student Details</Text>
+            <Text style={styles.summarySub}>Since cover page was skipped, please enter details manually.</Text>
+
+            <View style={styles.formGroup}>
+                <Text style={styles.label}>Student Name</Text>
+                <TextInput
+                    style={styles.input}
+                    value={studentInfo.name}
+                    onChangeText={t => setStudentInfo({ ...studentInfo, name: t })}
+                    placeholder="Enter Name"
+                />
+            </View>
+            <View style={styles.formGroup}>
+                <Text style={styles.label}>Roll No / ID</Text>
+                <TextInput
+                    style={styles.input}
+                    value={studentInfo.rollNo || ''}
+                    onChangeText={t => setStudentInfo({ ...studentInfo, rollNo: t })}
+                    placeholder="Enter Roll No"
+                />
+            </View>
+
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setStep('ANSWER_SCAN')}>
+                <Text style={styles.btnText}>Continue to Answer Scanning</Text>
+                <ArrowRight color="#fff" size={20} />
+            </TouchableOpacity>
+        </View>
+    );
+
+    const renderLanguageSelect = () => {
+        return (
+            <View style={styles.verifyContainer}>
+                <Text style={styles.stepTitle}>Select Question Language</Text>
+                <Text style={styles.summarySub}>Choose the primary language of the questions.</Text>
+
+                <View style={styles.languagesGrid}>
+                    {languages.map(lang => (
+                        <TouchableOpacity
+                            key={lang}
+                            style={[styles.langCard, selectedLanguage === lang && styles.langCardActive]}
+                            onPress={() => setSelectedLanguage(lang)}
+                        >
+                            <Text style={[styles.langText, selectedLanguage === lang && styles.langTextActive]}>{lang}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                <TouchableOpacity style={styles.primaryBtn} onPress={handleFinish}>
+                    <Text style={styles.btnText}>Start AI Evaluation</Text>
+                    <ClipboardCheck color="#fff" size={20} />
+                </TouchableOpacity>
+            </View>
+        );
+    };
 
     const renderScanner = (mode: 'COVER' | 'ANSWER') => (
         <View style={styles.scannerInterface}>
@@ -223,7 +281,7 @@ export default function EvaluationScreen({ route, navigation }: any) {
 
             {/* Skip Cover Option */}
             {mode === 'COVER' && (
-                <TouchableOpacity onPress={() => setStep('ANSWER_SCAN')} style={{ marginTop: 20 }}>
+                <TouchableOpacity onPress={() => setStep('MANUAL_INFO')} style={{ marginTop: 20 }}>
                     <Text style={{ color: theme.colors.textSecondary }}>Skip Cover Page</Text>
                 </TouchableOpacity>
             )}
@@ -262,9 +320,9 @@ export default function EvaluationScreen({ route, navigation }: any) {
                 <Text style={styles.addPageText}>Scan Another Page</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleFinish}>
-                <Text style={styles.btnText}>Complete Evaluation</Text>
-                <Check color="#fff" size={20} />
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setStep('LANGUAGE_SELECT')}>
+                <Text style={styles.btnText}>Next: Choose Language</Text>
+                <ArrowRight color="#fff" size={20} />
             </TouchableOpacity>
         </View>
     );
@@ -292,7 +350,9 @@ export default function EvaluationScreen({ route, navigation }: any) {
                     {step === 'SELECT' && renderSelectAssessment()}
                     {step === 'COVER_SCAN' && renderScanner('COVER')}
                     {step === 'COVER_VERIFY' && renderCoverVerify()}
+                    {step === 'MANUAL_INFO' && renderManualInfo()}
                     {step === 'ANSWER_SCAN' && renderScanner('ANSWER')}
+                    {step === 'LANGUAGE_SELECT' && renderLanguageSelect()}
                     {step === 'SUMMARY' && renderSummary()}
                 </ScrollView>
             )}
@@ -349,4 +409,33 @@ const styles = StyleSheet.create({
 
     addPageBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 16, borderWidth: 1, borderColor: theme.colors.primary, borderRadius: 12, borderStyle: 'dashed', marginBottom: 16 },
     addPageText: { color: theme.colors.primary, fontWeight: '600' },
+
+    // Languages Grid
+    languagesGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 24,
+    },
+    langCard: {
+        width: '47%',
+        backgroundColor: theme.colors.surface,
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        alignItems: 'center',
+    },
+    langCardActive: {
+        borderColor: theme.colors.primary,
+        backgroundColor: theme.colors.primary + '10',
+    },
+    langText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: theme.colors.text,
+    },
+    langTextActive: {
+        color: theme.colors.primary,
+    },
 });

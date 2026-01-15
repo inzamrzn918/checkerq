@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import apiClient from './apiClient';
+import { settingsService } from './settings';
 
 interface License {
     id: string;
@@ -31,6 +32,15 @@ class LicenseService {
     }
 
     async validateLicense(): Promise<License | null> {
+        // Check if offline mode is enabled
+        const isOffline = await settingsService.getOfflineMode();
+        if (isOffline) {
+            console.log('Skipping license validation: Offline Mode is enabled');
+            // Try to return cached license if available, otherwise just stay local
+            const cached = await SecureStore.getItemAsync('license');
+            return cached ? JSON.parse(cached) : null;
+        }
+
         try {
             const response = await apiClient.get('/api/licenses/validate');
 

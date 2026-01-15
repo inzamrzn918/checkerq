@@ -76,6 +76,18 @@ export const exportGradeCardToPDF = async (evaluation: Evaluation, assessment: A
                     <h3>Overall Feedback</h3>
                     <p>${evaluation.overallFeedback}</p>
                 </div>
+
+                <div style="page-break-before: always;">
+                    <div class="header">
+                        <h1 class="title">ANSWER SHEETS</h1>
+                    </div>
+                    ${evaluation.pages?.filter((p: any) => p.type === 'answer').map((page: any, i: number) => `
+                        <div style="margin-top: 20px; text-align: center; page-break-after: always;">
+                            <h3>Page ${i + 1}</h3>
+                            <img src="${page.uri}" style="width: 100%; max-height: 1000px; border: 1px solid #ccc;" />
+                        </div>
+                    `).join('') || '<p>No answer sheets available.</p>'}
+                </div>
             </body>
         </html>
     `;

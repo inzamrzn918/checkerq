@@ -31,7 +31,13 @@ export const MarkOverlay = ({ results, questions, height, width }: MarkOverlayPr
                         key={index}
                         style={[
                             styles.markBox,
-                            {
+                            // Use specific coordinates if available, otherwise classic list
+                            (res.answerRegions && res.answerRegions.length > 0) ? {
+                                top: (res.answerRegions[0].boundingBox[0] / 1000) * height,
+                                // Move to LEFT of the answer box. 
+                                // xmin is the left edge of answer. We subtract a margin to put it in the "margin space".
+                                left: Math.max(0, ((res.answerRegions[0].boundingBox[1] / 1000) * width) - 50)
+                            } : {
                                 top: margin + (index * 60),
                                 left: 10
                             }
@@ -39,9 +45,9 @@ export const MarkOverlay = ({ results, questions, height, width }: MarkOverlayPr
                     >
                         <View style={styles.iconBox}>
                             {isZero ? (
-                                <X size={20} color="red" />
+                                <X size={40} color="red" strokeWidth={3} />
                             ) : (
-                                <Check size={20} color="red" />
+                                <Check size={40} color="red" strokeWidth={3} />
                             )}
                         </View>
                         <Text style={styles.markText}>{res.obtainedMarks}</Text>

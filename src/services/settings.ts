@@ -2,6 +2,8 @@ import * as SecureStore from 'expo-secure-store';
 
 const GEMINI_KEY = 'gemini_api_key';
 const MISTRAL_KEY = 'mistral_api_key';
+const MAX_CONCURRENT_KEY = 'max_concurrent_evaluations';
+const OFFLINE_MODE_KEY = 'offline_mode_enabled';
 
 export interface ApiKeys {
     gemini?: string;
@@ -120,6 +122,40 @@ export const settingsService = {
             await this.setBackupPreferences(prefs);
         } catch (error) {
             console.error('Error updating last backup time:', error);
+        }
+    },
+
+    async getMaxConcurrent(): Promise<number> {
+        try {
+            const value = await SecureStore.getItemAsync(MAX_CONCURRENT_KEY);
+            return value ? parseInt(value, 10) : 3;
+        } catch (error) {
+            return 3;
+        }
+    },
+
+    async setMaxConcurrent(count: number): Promise<void> {
+        try {
+            await SecureStore.setItemAsync(MAX_CONCURRENT_KEY, count.toString());
+        } catch (error) {
+            console.error('Error setting max concurrent:', error);
+        }
+    },
+
+    async getOfflineMode(): Promise<boolean> {
+        try {
+            const value = await SecureStore.getItemAsync(OFFLINE_MODE_KEY);
+            return value === 'true';
+        } catch (error) {
+            return false;
+        }
+    },
+
+    async setOfflineMode(enabled: boolean): Promise<void> {
+        try {
+            await SecureStore.setItemAsync(OFFLINE_MODE_KEY, enabled.toString());
+        } catch (error) {
+            console.error('Error setting offline mode:', error);
         }
     },
 };

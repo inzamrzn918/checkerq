@@ -2,13 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme/theme';
-import { ChevronLeft, Save, Plus, Trash2 } from 'lucide-react-native';
+import { ChevronLeft, Save, Plus, Trash2, Globe, Check } from 'lucide-react-native';
 import { Question } from '../services/gemini';
 import { StorageService } from '../services/storage';
 
 export default function ReviewQuestionsScreen({ route, navigation }: any) {
-    const { questions: initialQuestions, paperImages, metadata } = route.params;
+    const { questions: initialQuestions, paperImages, metadata, languages: detectedLanguages = [] } = route.params;
     const [questions, setQuestions] = useState<Question[]>(initialQuestions);
+    const [languages, setLanguages] = useState<string[]>(detectedLanguages.length > 0 ? detectedLanguages : ['English']);
+    const [primaryLanguage, setPrimaryLanguage] = useState(
+        detectedLanguages.includes('English') ? 'English' : (detectedLanguages[0] || 'English')
+    );
+    const [newLang, setNewLang] = useState('');
+    const [showAddLang, setShowAddLang] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
 
     useEffect(() => {
@@ -62,15 +68,27 @@ export default function ReviewQuestionsScreen({ route, navigation }: any) {
                 teacherName: metadata.teacherName,
                 subject: metadata.subject,
                 classRoom: metadata.classRoom,
+                examType: metadata.examType || 'General',
+                academicYear: metadata.academicYear,
+                languages,
+                primaryLanguage,
                 questions,
                 paperImages,
                 createdAt: Date.now(),
             };
-            await StorageService.saveAssessment(assessment);
+            await StorageService.saveAssessment(assessment as any);
             setIsSaved(true);
             navigation.navigate('Home', { refresh: true });
         } catch (error) {
             console.error('Error saving assessment:', error);
+        }
+    };
+
+    const addLanguage = () => {
+        if (newLang.trim() && !languages.includes(newLang.trim())) {
+            setLanguages([...languages, newLang.trim()]);
+            setNewLang('');
+            setShowAddLang(false);
         }
     };
 
@@ -87,12 +105,66 @@ export default function ReviewQuestionsScreen({ route, navigation }: any) {
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
-                <Text style={styles.instruction}>Step 2: Verify Marking Scheme</Text>
+                <Text style={styles.instruction}>Step 2: Language & Scheme</Text>
+
+                {/* Language Selection */}
+                <View style={[styles.qCard, { marginBottom: 24 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Globe size={18} color={theme.colors.primary} />
+                        <Text style={styles.sectionTitle}>Select Evaluation Language</Text>
+                    </View>
+                    <Text style={styles.sectionSub}>English is default. AI will evaluate student answers in this language.</Text>
+
+                    <View style={styles.langList}>
+                        {languages.map(lang => (
+                            <TouchableOpacity
+                                key={lang}
+                                style={[styles.langChip, primaryLanguage === lang && styles.langChipActive]}
+                                onPress={() => setPrimaryLanguage(lang)}
+                            >
+                                <Text style={[styles.langText, primaryLanguage === lang && styles.langTextActive]}>{lang}</Text>
+                                {primaryLanguage === lang && <Check size={14} color="#fff" style={{ marginLeft: 4 }} />}
+                            </TouchableOpacity>
+                        ))}
+
+                        {!showAddLang ? (
+                            <TouchableOpacity style={styles.addLangToggle} onPress={() => setShowAddLang(true)}>
+                                <Plus size={14} color={theme.colors.primary} />
+                                <Text style={styles.addLangToggleText}>Add Language</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <View style={styles.addLangInputRow}>
+                                <TextInput
+                                    style={styles.addLangInput}
+                                    placeholder="Language name..."
+                                    placeholderTextColor={theme.colors.textSecondary}
+                                    value={newLang}
+                                    onChangeText={setNewLang}
+                                    autoFocus
+                                />
+                                <TouchableOpacity style={styles.addLangBtn} onPress={addLanguage}>
+                                    <Text style={styles.addLangBtnText}>Add</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.cancelLangBtn} onPress={() => setShowAddLang(false)}>
+                                    <Text style={styles.cancelLangBtnText}>✕</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </View>
+                </View>
 
                 {questions.map((q, index) => (
                     <View key={q.id} style={styles.qCard}>
                         <View style={styles.qHeader}>
-                            <Text style={styles.qNumber}>Q{index + 1}</Text>
+                            <View style={styles.qNumContainer}>
+                                <Text style={styles.qNumLabel}>No.</Text>
+                                <TextInput
+                                    style={styles.qNumInput}
+                                    value={q.questionNumber || (index + 1).toString()}
+                                    onChangeText={(val) => updateQuestion(q.id, 'questionNumber', val)}
+                                    placeholder="?"
+                                />
+                            </View>
                             <TouchableOpacity onPress={() => removeQuestion(q.id)}>
                                 <Trash2 color={theme.colors.error} size={18} />
                             </TouchableOpacity>
@@ -192,10 +264,27 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 8,
     },
-    qNumber: {
+    qNumContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: theme.colors.primary + '10',
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    qNumLabel: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: theme.colors.primary,
+        textTransform: 'uppercase',
+    },
+    qNumInput: {
         color: theme.colors.primary,
         fontWeight: 'bold',
         fontSize: 16,
+        minWidth: 40,
+        textAlign: 'center',
     },
     textInput: {
         color: theme.colors.text,
@@ -272,5 +361,96 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 18,
         fontWeight: 'bold',
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 8,
+    },
+    sectionTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: theme.colors.text,
+    },
+    sectionSub: {
+        fontSize: 12,
+        color: theme.colors.textSecondary,
+        marginBottom: 16,
+    },
+    langList: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        alignItems: 'center',
+    },
+    langChip: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+        backgroundColor: theme.colors.background,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    langChipActive: {
+        backgroundColor: theme.colors.primary,
+        borderColor: theme.colors.primary,
+    },
+    langText: {
+        fontSize: 13,
+        color: theme.colors.textSecondary,
+        fontWeight: '600',
+    },
+    langTextActive: {
+        color: '#fff',
+    },
+    addLangToggle: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
+    addLangToggleText: {
+        fontSize: 13,
+        color: theme.colors.primary,
+        fontWeight: '600',
+    },
+    addLangInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: theme.colors.background,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        paddingLeft: 12,
+        paddingRight: 4,
+        height: 36,
+    },
+    addLangInput: {
+        color: theme.colors.text,
+        fontSize: 13,
+        width: 100,
+        paddingVertical: 0,
+    },
+    addLangBtn: {
+        backgroundColor: theme.colors.primary,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6,
+    },
+    addLangBtnText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: 'bold',
+    },
+    cancelLangBtn: {
+        paddingHorizontal: 8,
+    },
+    cancelLangBtnText: {
+        color: theme.colors.textSecondary,
+        fontSize: 14,
     },
 });
