@@ -2,7 +2,7 @@
   "expo": {
     "name": "checkerq",
     "slug": "checkerq",
-    "version": "1.0.0",
+    "version": "1.0.13",
     "orientation": "portrait",
     "icon": "./assets/icon.jpg",
     "userInterfaceStyle": "light",
