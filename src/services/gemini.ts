@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { settingsService } from './settings';
 
 // In Expo, environment variables prefixed with EXPO_PUBLIC_ are accessible via process.env
 const DEFAULT_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
@@ -146,8 +147,20 @@ export const GeminiService = {
         return userApiKey || DEFAULT_API_KEY;
     },
 
+    async ensureApiKey(): Promise<string> {
+        let key = this.getApiKey();
+        if (!key) {
+            const keys = await settingsService.getApiKeys();
+            if (keys.gemini) {
+                this.setApiKey(keys.gemini);
+                key = keys.gemini;
+            }
+        }
+        return key;
+    },
+
     async extractQuestions(uris: string | string[]): Promise<{ questions: Question[], languages: string[] }> {
-        const apiKey = this.getApiKey();
+        const apiKey = await this.ensureApiKey();
         if (!apiKey) throw new Error("API Key not found. Please set it in Settings.");
 
         const uriList = Array.isArray(uris) ? uris : [uris];
@@ -225,7 +238,7 @@ export const GeminiService = {
     },
 
     async evaluatePaper(answerSheetUri: string, questions: Question[]): Promise<PaperEvaluation> {
-        const apiKey = this.getApiKey();
+        const apiKey = await this.ensureApiKey();
         if (!apiKey) throw new Error("API Key not found. Please set it in Settings.");
 
         return withRetry(async () => {
@@ -290,7 +303,7 @@ export const GeminiService = {
     },
 
     async evaluatePaperText(studentText: string, questions: Question[]): Promise<PaperEvaluation> {
-        const apiKey = this.getApiKey();
+        const apiKey = await this.ensureApiKey();
         if (!apiKey) throw new Error("API Key not found. Please set it in Settings.");
 
         return withRetry(async () => {
@@ -358,7 +371,7 @@ export const GeminiService = {
     },
 
     async extractStudentInfo(uri: string): Promise<{ name?: string; rollNo?: string; class?: string }> {
-        const apiKey = this.getApiKey();
+        const apiKey = await this.ensureApiKey();
         if (!apiKey) throw new Error("API Key not found.");
 
         return withRetry(async () => {
@@ -397,7 +410,7 @@ export const GeminiService = {
     },
 
     async extractText(uri: string): Promise<string> {
-        const apiKey = this.getApiKey();
+        const apiKey = await this.ensureApiKey();
         if (!apiKey) throw new Error("API Key not found.");
 
         return withRetry(async () => {

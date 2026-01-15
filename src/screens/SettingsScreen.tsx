@@ -7,6 +7,7 @@ import { ChevronLeft, Save, Key, Trash2, ExternalLink, Download, Upload, Cloud, 
 import { settingsService } from '../services/settings';
 import { BackupService } from '../services/backup';
 import { StorageService } from '../services/storage';
+import { GeminiService } from '../services/gemini';
 import { showError, showSuccess, showConfirm } from '../utils/errorHandler';
 import authService from '../services/authService';
 import licenseService from '../services/licenseService';
@@ -99,6 +100,10 @@ export default function SettingsScreen({ navigation }: any) {
             });
             await settingsService.setMaxConcurrent(parseInt(maxConcurrent, 10) || 3);
             await settingsService.setOfflineMode(offlineMode);
+
+            // Update running service immediately
+            GeminiService.setApiKey(geminiKey.trim());
+
             Alert.alert('Success', 'Settings saved successfully!');
             navigation.goBack();
         } catch (error) {

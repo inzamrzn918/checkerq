@@ -182,8 +182,8 @@ export default function SetupAssessmentScreen({ navigation }: any) {
                 paperImages: images,
                 metadata: { teacherName, subject, classRoom, examType, academicYear }
             });
-        } catch (error) {
-            Alert.alert('Error', 'Failed to extract questions. Please check your API key and try again.');
+        } catch (error: any) {
+            Alert.alert('Error', `Failed to extract questions: ${error.message}`);
             console.error(error);
         } finally {
             setLoading(false);

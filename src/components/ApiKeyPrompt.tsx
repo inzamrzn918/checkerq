@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { theme } from '../theme/theme';
 import { settingsService } from '../services/settings';
+import { GeminiService } from '../services/gemini';
 
 interface ApiKeyPromptProps {
     visible: boolean;
@@ -34,6 +35,9 @@ export default function ApiKeyPrompt({ visible, onKeysConfigured }: ApiKeyPrompt
                 gemini: geminiKey.trim(),
                 mistral: mistralKey.trim() || undefined,
             });
+            // Immediately update the service
+            GeminiService.setApiKey(geminiKey.trim());
+
             onKeysConfigured();
         } catch (error) {
             Alert.alert('Error', 'Failed to save API keys. Please try again.');
